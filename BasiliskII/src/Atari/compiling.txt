@@ -1,0 +1,35 @@
+
+Build with Vincent Rivière's GCC 4.6.4
+http://vincent.riviere.free.fr/soft/m68k-atari-mint/
+
+Some host version of GCC is needed to build a few tools.
+
+
+Todos:
+
+General:
+  - The code needs tidying up...
+  - Implement:
+      ether_atari
+      extfs_atari
+      serial_atari
+      scsi_atari
+
+Disk:
+  - Implement a decent disk cache
+  - CDRom support
+
+Sound:
+  - Sound not working in SoundManager 3.2.1+
+
+  - Sound issues in general. Specifically, some software cannot detect when
+    sounds have finished playing, ending up waiting forever.
+    (Prince of Persia is a good example)
+
+
+68060 FPU:
+  - We need to integrate the 060 rom patches from Amiga Shapeshifter.
+    The Motorola support software is present but we still need to integrate
+    some of the 060 rom patches from Amiga Shapeshifter (frestore has a
+    different stack frame compared to 040)
+

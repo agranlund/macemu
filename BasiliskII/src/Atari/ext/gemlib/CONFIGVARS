@@ -1,0 +1,115 @@
+# 
+# 
+# cross compiling
+CROSS = yes
+#CROSS = no
+
+# 
+# cross compiling
+#
+ifneq (yes,$(M68K_ATARI_MINT_CROSS))
+ifeq (no,$(M68K_ATARI_MINT_CROSS))
+CROSS = no
+else
+EVAL_CROSS := case `uname -s` in *MiNT*) echo no;; *) echo yes; esac
+CROSS := $(shell $(EVAL_CROSS))
+endif
+else
+CROSS = yes
+endif
+
+#
+# build alternate libraries for processor variants
+#
+WITH_020_LIB = no
+WITH_V4E_LIB = no
+
+#
+# target and host compiler
+# 
+# Define this to "m68k-atari-mint" if you cross compile.
+ifneq ($(CROSS_TOOL),)
+ CROSSPREFIX=$(CROSS_TOOL)-
+ CROSS := yes
+else
+ifeq ($(CROSS),yes)
+ CROSS_TOOL=m68k-atari-mint
+ CROSSPREFIX=$(CROSS_TOOL)-
+else
+ CROSSPREFIX=
+endif
+endif
+
+ifeq ($(CROSS),yes)
+
+NATIVECC = gcc
+NATIVECFLAGS = -O
+CRLF = echo crlf -s
+
+PREFIX=$(shell $(CROSSPREFIX)gcc -print-sysroot)/usr
+ifeq ($(PREFIX),)
+  PREFIX=/usr/$(CROSS_TOOL)
+endif
+
+else
+
+CROSSPREFIX=
+
+NATIVECC = gcc
+NATIVECFLAGS = -O
+CRLF  = crlf -s
+
+PREFIX=/usr
+
+endif
+
+CC = $(CROSSPREFIX)gcc
+AS = $(CC)
+AR = $(CROSSPREFIX)ar
+RANLIB = $(CROSSPREFIX)ranlib
+STRIP = $(CROSSPREFIX)strip
+FLAGS = $(CROSSPREFIX)flags
+
+# 
+# some tools
+# 
+YACC  = bison -dk
+LEX   = flex
+MV    = mv
+CP    = cp
+RM    = rm -f
+TOUCH = touch
+MKDIR = mkdir
+SED   = sed
+TAR   = tar
+
+
+#
+# optimizations
+# 
+OPTS = -O2 -fomit-frame-pointer
+
+
+#
+# warning options
+#
+WARN = \
+	-Wall \
+	-Wmissing-prototypes \
+	-Winline \
+	-Wshadow \
+	-Wpointer-arith \
+	-Wcast-qual \
+	-Wdeclaration-after-statement \
+	-Waggregate-return
+
+#
+# default definitions
+#
+DEFINITIONS = 
+
+
+#
+# model type
+#
+MODEL = 

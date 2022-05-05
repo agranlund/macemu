@@ -39,6 +39,8 @@ extern void LoadPrefsFromStream(FILE *f);
 extern void SavePrefsToStream(FILE *f);
 
 // Public preferences access functions
+extern bool PrefsExist(const char* name);
+
 extern void PrefsAddString(const char *name, const char *s);
 extern void PrefsAddBool(const char *name, bool b);
 extern void PrefsAddInt32(const char *name, int32 val);

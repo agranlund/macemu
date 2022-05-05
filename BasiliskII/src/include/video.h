@@ -176,7 +176,7 @@ public:
 
 	// Mac video driver functions
 	int16 driver_open(void);
-	int16 driver_control(uint16 code, uint32 param, uint32 dce);
+	virtual int16 driver_control(uint16 code, uint32 param, uint32 dce);
 	int16 driver_status(uint16 code, uint32 param);
 
 protected:

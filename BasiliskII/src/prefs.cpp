@@ -333,6 +333,13 @@ extern "C" const char *PrefsFindStringC(const char *name, int index)
 	return PrefsFindString(name, index);
 }
 
+bool PrefsExist(const char* name)
+{
+	if (find_node(name, TYPE_ANY, 0))
+		return true;
+	return false;
+}
+
 bool PrefsFindBool(const char *name)
 {
 	prefs_node *p = find_node(name, TYPE_BOOLEAN, 0);
@@ -413,6 +420,14 @@ void LoadPrefsFromStream(FILE *f)
 		char *value = p;
 		int32 i = atol(value);
 
+		// Terminate string after value
+		while(*p) {
+			if (*p == '\r' || *p == '\n')
+				*p = 0;
+			else
+				p++;
+		}
+
 		// Look for keyword first in prefs item list
 		const prefs_desc *desc = find_prefs_desc(keyword);
 		if (desc == NULL) {
@@ -457,10 +472,12 @@ static void write_prefs(FILE *f, const prefs_desc *list)
 				break;
 			}
 			case TYPE_BOOLEAN:
-				fprintf(f, "%s %s\n", list->name, PrefsFindBool(list->name) ? "true" : "false");
+				if (PrefsExist(list->name))
+					fprintf(f, "%s %s\n", list->name, PrefsFindBool(list->name) ? "true" : "false");
 				break;
 			case TYPE_INT32:
-				fprintf(f, "%s %d\n", list->name, PrefsFindInt32(list->name));
+				if (PrefsExist(list->name))
+					fprintf(f, "%s %d\n", list->name, PrefsFindInt32(list->name));
 				break;
 			default:
 				break;

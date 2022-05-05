@@ -101,6 +101,32 @@ extern void kprintf(const char *, ...);
 #endif
 #define bug kprintf
 
+#elif defined(ATARI)
+
+#ifdef NDEBUG
+	#ifdef DEBUG
+	#undef DEBUG
+	#endif
+	#define DEBUG 0
+	#define bug
+#else
+	#ifdef HEAVYDEBUG
+		#ifdef DEBUG
+		#undef DEBUG
+		#endif
+		#define DEBUG 1
+	#endif	
+
+	#ifdef __cplusplus
+	extern "C" {
+	#endif
+	extern void aprintf(const char *, ...);
+	#ifdef __cplusplus
+	}
+	#endif
+	#define bug aprintf
+#endif
+
 #else
 
 // Other systems just print it to stdout

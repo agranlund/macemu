@@ -1100,6 +1100,18 @@ static bool patch_rom_32(void)
 	*wp++ = htons(0x7e00 + CPUType);
 	*wp = htons(M68K_RTS);
 
+#if REAL_ADDRESSING && defined(ATARI)
+	// Don't move VBR
+	wp = (uint16 *)(ROMBaseHost + 0x25f4);
+	*wp++ = htons(M68K_NOP);
+	*wp++ = htons(M68K_NOP);
+
+	// VBL int patch
+	wp = (uint16 *)(ROMBaseHost + 0xa2a8);
+	*wp++ = htons(M68K_NOP);
+	*wp++ = htons(M68K_NOP);
+#endif
+
 	// Don't clear end of BootGlobs upto end of RAM (address xxxx0000)
 	static const uint8 clear_globs_dat[] = {0x42, 0x9a, 0x36, 0x0a, 0x66, 0xfa};
 	base = find_rom_data(0xa00, 0xb00, clear_globs_dat, sizeof(clear_globs_dat));

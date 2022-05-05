@@ -1,0 +1,15 @@
+logging file
+irqsafe false
+keyboardtype 5
+nocdrom false
+nosound true
+nogui false
+seriala ser
+serialb par
+fpu true
+ramsize 0
+modelid 5
+rom LCIII.ROM
+bootdrive 0
+bootdriver 0
+disk hdd.dsk
