@@ -1090,7 +1090,7 @@ extern "C" void VecTimer2C(uint16 oldsr)
 
 			// save xpram to disk every now and again
 			cntXpram++;
-			if (cntXpram > 10)
+			if (cntXpram > 60)
 			{
 				static uint8 last_xpram[XPRAM_SIZE];
 				if (!IsSection(SECTION_TOS) && !IsSection(SECTION_DISK))
