@@ -911,10 +911,11 @@ static void __attribute__ ((interrupt)) timerA_COVOX(void)
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
+volatile uint8 cart_read_to_write;
 static void __attribute__ ((interrupt)) timerA_MV16(void)
 {
 	uint16 sample = snd_buffer[sndDriverST::pos] << 4;
-	uint8 b = *((volatile uint8*)(0x00fa0000 + sample));
+	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
 	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
@@ -922,7 +923,7 @@ static void __attribute__ ((interrupt)) timerA_MV16(void)
 static void __attribute__ ((interrupt)) timerA_Replay8(void)
 {
 	uint16 sample = snd_buffer[sndDriverST::pos] << 1;
-	uint8 b = *((volatile uint8*)(0x00fa0000 + sample));
+	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
 	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
@@ -930,8 +931,8 @@ static void __attribute__ ((interrupt)) timerA_Replay8(void)
 static void __attribute__ ((interrupt)) timerA_Replay8S(void)
 {
 	uint16 sample = *((uint16*)(&snd_buffer[sndDriverST::pos]));
-	uint8 b1 = *((volatile uint8*)(0x00fa0000 + ((sample << 1) & 0x1FE)));
-	uint8 b2 = *((volatile uint8*)(0x00fa0200 + ((sample >> 7) & 0x1FE)));
+	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + ((sample << 1) & 0x1FE)));
+	cart_read_to_write = *((volatile uint8*)(0x00fa0200 + ((sample >> 7) & 0x1FE)));
 	sndDriverST::pos = (sndDriverST::pos + 2) & (snd_buffer_size - 1);
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
@@ -939,7 +940,7 @@ static void __attribute__ ((interrupt)) timerA_Replay8S(void)
 static void __attribute__ ((interrupt)) timerA_Replay16(void)
 {
 	uint16 sample = *((uint16*)(&snd_buffer[sndDriverST::pos])) >> 1;
-	uint8 b = *((volatile uint8*)(0x00fa0000 + sample));
+	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
 	sndDriverST::pos = (sndDriverST::pos + 2) & (snd_buffer_size - 1);
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
@@ -982,10 +983,7 @@ void sndDriverST::InstallIrq()
 	const uint32 baseclk = 2457600;
 
 	int hz = (audio_sample_rates[audio_sample_rate_index] >> 16);
-
-	int requested = hz;
 	int bestDiff = 0xFFFFFF;
-	int bestVal;
 	uint16 bestCtrl = 1;
 	uint16 bestData = 1;
 
@@ -999,7 +997,6 @@ void sndDriverST::InstallIrq()
 			if (diff < bestDiff)
 			{
 				bestDiff = diff;
-				bestVal = val;
 				bestCtrl = (i+1);
 				bestData = j;
 			}

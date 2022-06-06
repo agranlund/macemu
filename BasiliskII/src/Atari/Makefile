@@ -26,7 +26,7 @@ LDFLAGS = $(LIBCMINI_LIB) -l:$(GEMLIB) -lgcc -lstdc++ -lcmini -lgcc
 SYMFLAGS = -Wl,--traditional-format
 
 PARCP			= ./tools/parcp421/apple/parcp
-PARCP_DST		= D:\BASILISK
+PARCP_DST		= H:\
 
 
 # target parameter
@@ -89,6 +89,7 @@ CXXFLAGS = -std=c++0x \
 	$(DEFS) \
 	$(SYMFLAGS) \
 	-fpermissive -fomit-frame-pointer -fno-exceptions \
+	-Wall -Wno-multichar \
 	-Wl,-Map,mapfile \
 
 SFLAGS = $(DEFS)
@@ -106,7 +107,7 @@ SRCS = blank.S \
 	debug_atari.cpp input_atari.cpp zeropage.cpp 68030_pmmu.cpp \
 	asm_support.S asm_support030.S asm_support040.S asm_support060.S \
 	ext/68040_pmmu.S \
-	ext/c2p/c2p1x1_8_from_8.S ext/c2p/c2p1x1_8_from_8_halfx.S ext/c2p/c2p1x1_8_from_8_halfx_060.S \
+	ext/c2p/c2p1x1_8_from_8.S ext/c2p/c2p1x1_8_from_8_halfx.S \
 	ext/c2p/c2p1x1_4_from_8.S ext/c2p/c2p1x1_4_from_8_halfx.S \
 	ext/c2p/c2p1x1_4_from_4.S \
 	
@@ -227,7 +228,7 @@ go:
 	echo "LCD $(OUT_DIR)" >> parcp.cmd
 	echo "PUT $(OUT_APP)" >> parcp.cmd
 	echo "PUT basilisk.rsc" >> parcp.cmd
-	echo "EXEC -n $(OUT_APP)" >> parcp.cmd
+#	echo "EXEC -n $(OUT_APP)" >> parcp.cmd
 	echo "QUIT" >> parcp.cmd
 	$(PARCP) -b parcp.cmd
 

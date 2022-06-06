@@ -97,6 +97,9 @@ void ikbd_write(uint8 data)
     }
 }
 
+volatile uint8 midi_data;
+volatile uint8 keyb_data;
+
 extern "C" void VecAciaC()
 {
     #define SETSTATE(s,l) { cur_packet.state = s; cur_packet.len = 0; cur_packet.remain = l; }
@@ -104,12 +107,9 @@ extern "C" void VecAciaC()
     if (!input_inited)
         return;
 
-    uint16 loops = 0;
-    bool again = true;
     while (1)
     {
         // throw away midi
-        uint8 midi_data;
         uint8 midi_ctrl = *ACIA_REG_MIDICTRL;
         if (midi_ctrl & ACIA_FLAG_IRQ)
             midi_data = *ACIA_REG_MIDIDATA;
@@ -125,7 +125,7 @@ extern "C" void VecAciaC()
         {
             //if (cur_packet.state != IKBD_STATE_RESET)
             {
-                uint8 keyb_data = *ACIA_REG_KEYDATA;
+                keyb_data = *ACIA_REG_KEYDATA;
                 SETSTATE(IKBD_STATE_FAULT, 1)
                 return;
             }
@@ -133,7 +133,7 @@ extern "C" void VecAciaC()
 
         if (keyb_ctrl & ACIA_FLAG_RX_RDY)
         {
-            uint8 keyb_data = *ACIA_REG_KEYDATA;
+            keyb_data = *ACIA_REG_KEYDATA;
 
             if (cur_packet.state == IKBD_STATE_FAULT)
                 return;
@@ -536,7 +536,7 @@ void UpdateInput()
 void RequestInput()
 {
     // ask for new mouse data
-    if (!mouse_requested)
+    if (input_inited && !mouse_requested)
     {
         mouse_requested = true;
         ikbd_write(0x0D);

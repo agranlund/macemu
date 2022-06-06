@@ -83,67 +83,139 @@ struct file_handle
 typedef int32 (*xhdi_ptr)(...);
 xhdi_ptr xhdi = 0;
 ahdi_data* ahdi = 0;
-
-static bool sys_cache_enabled = false;
 static uint8 sys_tempbuf[256];
 
-#define CACHE_BLOCK_COUNT	2
-#define CACHE_BLOCK_SIZE	(16 * 1024)
+#define CACHE_MAX_SIZE		(4 * 1024 * 1024)
+#define CACHE_BLOCK_SIZE	(32 * 1024)
+#define CACHE_BLOCK_SHIFT	15
+#define CACHE_MAX_BLOCKS	(CACHE_MAX_SIZE / CACHE_BLOCK_SIZE)
 #define CACHE_DEBUG			0
 
+
 #if SUPPORT_CACHE
-	struct cache_block
+
+	struct CacheBlock
 	{
-		uint16 	id;
-		loff_t	pos;
-		loff_t	end;
-		uint8	buf[CACHE_BLOCK_SIZE];
+		uint16	id;
+		uint32	block;
+		uint8*	data;
 	};
 
-	cache_block	cache[CACHE_BLOCK_COUNT];
-	uint16 next_block = 0;
 	#if CACHE_DEBUG
-		uint32 cache_hits = 0;
-		uint32 cache_miss = 0;
-		uint32 cache_skip = 0;
+	uint32 cache_hits = 0;
+	uint32 cache_miss = 0;
 	#endif
+	uint8* cache_buf = 0;
+	uint32 cache_count = 0;
+	CacheBlock cache_blocks[CACHE_MAX_BLOCKS];
+	uint32 sys_cache_size = 0;
 
-	inline uint16 cache_new(loff_t pos)
+	CacheBlock* cache_get_new(uint16 id, uint32 block)
 	{
-		uint16 idx = next_block;
-		next_block++;
-		if (next_block >= CACHE_BLOCK_COUNT)
-			next_block = 0;
-		return idx;
+		extern tm_time_t globalTimerTime;
+		static uint16 next = 0;
+		next++;
+
+		CacheBlock* b = cache_blocks;
+		for (uint16 i=0; i<cache_count; i++, b++)
+		{
+			if (b->id == 0xFFFF)
+			{
+				b->id = id;
+				b->block = block;
+				return b;
+			}
+		}
+		uint16 r = 255 & (next + (globalTimerTime.tv_usec >> 5));
+		while (r >= cache_count)
+			r -= cache_count;
+
+		b = &cache_blocks[r];
+		b->id = id;
+		b->block = block;
+		return b;
 	}
+
+	uint32 cache_get_blocks(uint32 pos, uint32 size, uint32& blocks, uint32& blocke)
+	{
+		if (size > CACHE_BLOCK_SIZE)
+			return 0;
+		blocks = pos >> CACHE_BLOCK_SHIFT;
+		blocke = (pos + size - 1) >> CACHE_BLOCK_SHIFT;
+		return blocke - blocks + 1;
+	}
+
+	void cache_clear_all()
+	{
+		for (uint16 i=0; i<cache_count; i++) {
+			cache_blocks[i].id = 0xFFFF;
+		}
+	}
+
+	void cache_clear(uint16 id, uint32 pos, uint32 size)
+	{
+		uint32 blocks, blocke;
+		uint32 blockc = cache_get_blocks(pos, size, blocks, blocke);
+		if (blockc < 1)
+			return;
+		for (uint16 i=0; i<cache_count; i++)
+		{
+			CacheBlock& b = cache_blocks[i];
+			if (b.id == id) {
+				if ((b.block >= blocks) && (b.block <= blocke))
+					b.id = 0xFFFF;
+			}
+		}
+	}
+
+	bool cache_read(uint16 id, uint32 pos, uint32 size, uint8* buf)
+	{
+		uint32 blocks, blocke;
+		uint32 blockc = cache_get_blocks(pos, size, blocks, blocke);
+		if (blockc < 1) {
+			#if CACHE_DEBUG
+			cache_miss++;
+			#endif
+			return false;
+		}
+		uint32 hits = 0;
+		while (blocks <= blocke)
+		{
+			for (uint16 i=0; i<cache_count; i++)
+			{
+				CacheBlock& b = cache_blocks[i];
+				if ((b.id == id) && (b.block == blocks))
+				{
+					uint32 boff = pos - (blocks << CACHE_BLOCK_SHIFT);
+					uint32 bsiz = CACHE_BLOCK_SIZE - boff;
+					uint32 blen = size;
+					if (blen > bsiz)
+						blen = bsiz;
+					memcpy(buf, b.data + boff, blen);
+					buf += blen;
+					pos += blen;
+					size -= blen;
+					hits++;
+					i = cache_count;
+				}
+			}
+			blocks++;
+		}
+		if (hits != blockc) {
+			#if CACHE_DEBUG
+			cache_miss++;
+			#endif
+			return false;
+		}
+		#if CACHE_DEBUG
+		cache_hits++;
+		D(bug("cache hit (%d, %d)\n", cache_hits, cache_miss));
+		#endif
+		return true;
+	}
+
 #endif
-/*
-class DiskAccess
-{
-public:
-	DiskAccess()
-	{
-		oldSR = DisableInterrupts();
-		oldZP = SetZeroPage(ZEROPAGE_TOS);
-		oldsavptr = *((volatile uint32*)0x4a2);
-		*((volatile uint32*)0x4a2) = &savptr[50];
-		SetSR(0x2100);
-	}
-	~DiskAccess()
-	{
-		DisableInterrupts();
-		*((volatile uint32*)0x4a2) = oldsavptr;
-		SetZeroPage(oldZP);
-		SetSR(oldSR);
-	}
-private:
-	uint16 oldSR;
-	uint16 oldZP;
-	uint32* oldsavptr;
-	uint8 savptr[50];
-};
-#define DISK_ACCESS()	DiskAccess disk_access;
-*/
+
 #define DISK_ACCESS()	TOS_CONTEXT()
 
 /*
@@ -160,10 +232,29 @@ void SysInit(void)
 		ahdi = 0;
 
 #if SUPPORT_CACHE
-	sys_cache_enabled = PrefsFindBool("diskcache");
-	D(bug(" Cache %s\n", sys_cache_enabled ? "enabled" : "disabled"));
-	for (uint16 i=0; i<CACHE_BLOCK_COUNT; i++)
-		cache[i].id = 0xFFFF;
+	extern int diskCacheSize;
+	int32 csize = diskCacheSize;
+	if (csize > (CACHE_BLOCK_SIZE * 2))
+	{
+		if (csize > CACHE_MAX_SIZE)
+			csize = CACHE_MAX_SIZE;
+
+		uint32 cblocks = csize >> CACHE_BLOCK_SHIFT;
+		uint8* cbuf = Mxalloc(csize, 3);
+		if (cbuf)
+		{
+			cache_buf = cbuf;
+			cache_count = cblocks;
+			for (uint16 i=0; i<cache_count; i++)
+			{
+				cache_blocks[i].id = 0xFF;
+				cache_blocks[i].block = 0;
+				cache_blocks[i].data = cbuf;
+				cbuf += CACHE_BLOCK_SIZE;
+			}
+		}
+	}
+	log(" Cache: %dKb (%d blocks)\n", (cache_count << CACHE_BLOCK_SHIFT) / 1024, cache_count);
 #endif
 
 	int32 devmode = PrefsFindInt32("diskdevmode");
@@ -279,7 +370,7 @@ void *Sys_open(const char *name, bool read_only)
 	#if SUPPORT_DEV
 		int32 dmaj = -1;
 		int32 dmin = -1;
-		if (sscanf(name, "dev:%d.%d:%d:%d", &dmaj, &dmin, &dev_blockstart, &dev_blocks) < 4)
+		if (sscanf(name, "dev:%ld.%ld:%lu:%lu", &dmaj, &dmin, &dev_blockstart, &dev_blocks) < 4)
 		{
 			D(bug(" Err: invalid dev format\n"));
 			return NULL;
@@ -337,7 +428,7 @@ void *Sys_open(const char *name, bool read_only)
 		uint32 req_partition_offset = 0;
 		uint32 req_partition_size = 0;
 		char dev_letter = 0;
-		sscanf(name, "raw:%c:%d:%d", &dev_letter, &req_partition_offset, &req_partition_size);
+		sscanf(name, "raw:%c:%lu:%lu", &dev_letter, &req_partition_offset, &req_partition_size);
 		if ((dev_letter >= 'A') && (dev_letter <= 'Z'))
 			dev_letter = (dev_letter - 'A') + 'a';
 		if ((dev_letter < 'a') || (dev_letter >'z')) {
@@ -613,13 +704,10 @@ void Sys_close(void *arg)
 		Fclose(fh->f);
 		ExitSection(SECTION_TOS);
 		#if SUPPORT_CACHE
-		for (uint16 i=0; i<CACHE_BLOCK_COUNT; i++)
-			if (cache[i].id == fh->id)
-				cache[i].id = 0xFFFF;
+		if (cache_count > 0)
+			cache_clear_all();
 		#endif
 	}
-
-
 	delete fh;
 }
 
@@ -635,44 +723,17 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 	Section s(SECTION_DISK);
 
 	file_handle *fh = (file_handle *)arg;
-	if (!fh)
-	{
+	if (!fh) {
 		D(bug("Sys_read error: NULL file handle\n"));
 		return 0;
 	}
 
 	#if SUPPORT_CACHE
-	bool cacheable = (sys_cache_enabled && (length < CACHE_BLOCK_SIZE) && (fh->is_file));
-	if (cacheable)
-	{
-		for (uint16 i=0; i<CACHE_BLOCK_COUNT; i++)
-		{
-			cache_block& block = cache[i];
-			if (fh->id == block.id)
-			{
-				if ((offset >= block.pos) && ((offset+length) <= block.end))
-				{
-					memcpy(buffer, &block.buf[offset - block.pos], length);
-					#if CACHE_DEBUG
-					cache_hits++;
-					D(bug("Sys_read [%d] cache (HIT)   : %d : %d  (hms: %d / %d / %d)\n", fh->id, offset / 512, length, cache_hits, cache_miss, cache_skip));
-					#endif
-					return length;
-				}
-			}
+	if (cache_count > 0) {
+		if (cache_read(fh->id, offset, length, buffer)) {
+			return length;
 		}
-		#if CACHE_DEBUG
-		cache_miss++;
-		D(bug("Sys_read [%d] cache (MISS)  : %d : %d  (hms: %d / %d / %d)\n", fh->id, offset / 512, length, cache_hits, cache_miss, cache_skip));
-		#endif			
 	}
-	#if CACHE_DEBUG
-	else
-	{
-		cache_skip++;
-		D(bug("Sys_read [%d] cache (SKIP) : %d : %d  (mhs: %d / %d / %d)\n", fh->id, offset / 512, length, cache_hits, cache_miss, cache_skip));
-	}
-	#endif
 	#endif
 
 	// device / raw
@@ -722,25 +783,6 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 		#endif
 		if (xhdi)
 		{
-			// xhdi
-			if (cacheable)
-			{
-				uint16 cache_block_idx = cache_new(offset);
-				cache_block& block = cache[cache_block_idx];
-				struct XHReadWriteParams { uint16 opcode; uint16 major; uint16 minor; uint16 rwflag; uint32 recno; uint16 count; void *buf; };
-				XHReadWriteParams p = {10, dev_major, dev_minor, 0, start, CACHE_BLOCK_SIZE>>9, block.buf};
-				EnterSection(SECTION_TOS);
-				result = xhdi(p);
-				ExitSection(SECTION_TOS);
-				if (result >= 0)
-				{
-					block.id = fh->id;
-					block.pos = offset;
-					block.end = offset + CACHE_BLOCK_SIZE;
-					memcpy(buffer, (void*)block.buf, length);
-					return length;
-				}
-			}
 			struct XHReadWriteParams { uint16 opcode; uint16 major; uint16 minor; uint16 rwflag; uint32 recno; uint16 count; void *buf; };
 			XHReadWriteParams p = {10, dev_major, dev_minor, 0, start, count, buffer};
 			EnterSection(SECTION_TOS);
@@ -751,22 +793,6 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 		{
 			// ahdi
 			uint16 dev = 2 + ((dev_major | dev_minor) & PUN_DEV);
-			if (cacheable)
-			{
-				uint16 cache_block_idx = cache_new(offset);
-				cache_block& block = cache[cache_block_idx];
-				EnterSection(SECTION_TOS);
-				result = Rwabs(8, block.buf, CACHE_BLOCK_SIZE>>9, -1, dev, start);
-				ExitSection(SECTION_TOS);
-				if (result == 0)
-				{
-					block.id = fh->id;
-					block.pos = offset;
-					block.end = offset + CACHE_BLOCK_SIZE;
-					memcpy(buffer, (void*)block.buf, length);
-					return length;
-				}
-			}
 			EnterSection(SECTION_TOS);
 			result = Rwabs(8, buffer, count, -1, dev, start);
 			ExitSection(SECTION_TOS);
@@ -784,60 +810,79 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 	else
 	{
 		DISK_ACCESS();
-		uint32 p = offset + fh->start_byte;
+
+		// Read data
+		#ifdef HEAVYDEBUG
+		D(bug("Sys_read [%d] file read %d : %d\n", fh->id, offset, length));
+		#endif
+
+		#if SUPPORT_CACHE
+		if (cache_count > 0)
+		{
+			uint32 blocks, blocke;
+			uint32 blockc = cache_get_blocks(offset, length, blocks, blocke);
+			uint32 remain = length;
+			if (blockc >= 1)
+			{
+				uint8* dst = (uint8*)buffer;
+				loff_t p = fh->start_byte + (blocks << CACHE_BLOCK_SHIFT);
+				if (p != fh->cur_pos) {
+					EnterSection(SECTION_TOS);
+					Fseek(p, fh->f, SEEK_SET);
+					ExitSection(SECTION_TOS);
+				}
+				while (blocks <= blocke)
+				{
+					CacheBlock* b = cache_get_new(fh->id, blocks);
+					EnterSection(SECTION_TOS);
+					int32 actual = Fread(fh->f, CACHE_BLOCK_SIZE, b->data);
+					ExitSection(SECTION_TOS);
+					if (actual > 0) {
+						fh->cur_pos += actual;
+					}
+					if (actual != CACHE_BLOCK_SIZE) {
+						D(bug(" Err: read to cache %d/%d\n", actual, CACHE_BLOCK_SIZE));
+						b->id = 0xFFFF;
+						return 0;
+					}
+					uint32 bpos = (blocks << CACHE_BLOCK_SHIFT);
+					uint32 boff = offset - bpos;
+					uint32 bsiz = CACHE_BLOCK_SIZE - boff;
+					uint32 blen = remain;
+					if (blen > bsiz) {
+						blen = bsiz;
+					}
+					memcpy(dst, b->data + boff, blen);
+					dst += blen;
+					offset += blen;
+					remain -= blen;
+					blocks++;
+				}
+				return length;
+			}
+		}
+		#endif
+
+		int32 p = fh->start_byte + offset;
 		if (fh->cur_pos != p)
 		{
 			EnterSection(SECTION_TOS);
 			int32 result = Fseek(p, fh->f, SEEK_SET);
 			ExitSection(SECTION_TOS);
-			if (result < 0)
-			{
+			if (result < 0) {
 				D(bug("Sys_read [%d] file seek error! %d -> %d\n", fh->id, fh->cur_pos / 512, p / 512));
 				return 0;
 			}
 			fh->cur_pos = result;
 		}
 
-		// Read data
-		#ifdef HEAVYDEBUG
-		D(bug("Sys_read [%d] file read %d : %d\n", fh->id, p / 512, length / 512));
-		#endif
-		int32 actual = -1;
-
-		#if SUPPORT_CACHE
-		if (cacheable)
-		{
-			uint16 cache_block_idx = cache_new(offset);
-			cache_block& block = cache[cache_block_idx];
-			EnterSection(SECTION_TOS);
-			actual = Fread(fh->f, CACHE_BLOCK_SIZE, block.buf);
-			ExitSection(SECTION_TOS);
-			if (actual >= length)
-			{
-				block.id = fh->id;
-				block.pos = offset;
-				block.end = offset + actual;
-				memcpy(buffer, (void*)block.buf, length);
-				fh->cur_pos += actual;
-				return length;
-			}
-			D(bug(" Err: cache write. got %d/%d\n", actual, length));
-			EnterSection(SECTION_TOS);
-			Fseek(fh->cur_pos, fh->f, SEEK_SET);
-			ExitSection(SECTION_TOS);
-		}
-		#endif
-
 		EnterSection(SECTION_TOS);
-		actual = Fread(fh->f, length, buffer);
+		int32 actual = Fread(fh->f, length, buffer);
 		ExitSection(SECTION_TOS);
-		if (actual < 0)
-		{
+		if (actual < 0) {
 			D(bug(" Err: read %d / %d\n", actual, length));
 			return 0;
-		}
-		else
-		{
+		} else {
 			fh->cur_pos += actual;
 			return actual;
 		}
@@ -863,12 +908,8 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 	}
 
 	#if SUPPORT_CACHE
-	if (sys_cache_enabled)
-	{
-		for (uint16 i=0; i<CACHE_BLOCK_COUNT; i++)
-			if (cache[i].id == fh->id)
-				cache[i].id = 0xFFFF;
-	}
+	if (cache_count > 0)
+		cache_clear(fh->id, offset, length);
 	#endif
 
 	DISK_ACCESS();
@@ -880,7 +921,7 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 		uint16 dev_minor = ((fh->device >> 16) & 0x7FFF);
 		uint32 start = (fh->start_byte + offset) >> 9;
 		uint16 count = length >> 9;
-		int32 result;
+		int32 result = 0;
 
 		#ifdef HEAVYDEBUG
 		D(bug("Sys_write [%02d] device %d.%d : %d blocks at %d\n", fh->id, dev_major, dev_minor, count, start));
@@ -949,7 +990,7 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 	// disk image file
 	else
 	{
-		uint32 p = offset + fh->start_byte;
+		loff_t p = offset + fh->start_byte;
 		if (fh->cur_pos != p)
 		{
 			EnterSection(SECTION_TOS);
@@ -969,7 +1010,7 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 		EnterSection(SECTION_TOS);
 		int32 actual = Fwrite(fh->f, length, buffer);
 		ExitSection(SECTION_TOS);
-		if (actual != length)
+		if (actual != (int32)length)
 		{
 			D(bug(" Err: wrote %d / %d\n", actual, length));
 			return 0;

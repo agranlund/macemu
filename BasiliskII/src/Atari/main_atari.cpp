@@ -43,6 +43,7 @@
 #include "macos_util.h"
 #include "adb.h"
 
+#include "video_atari.h"
 #include "input_atari.h"
 #include "debug_atari.h"
 #include "asm_support.h"
@@ -91,6 +92,7 @@ bool isMagic = false;
 bool isMint  = false;
 bool isFalcon = false;
 uint16 tosVersion = 0;
+int diskCacheSize = 0;
 
 // CPU and FPU type, addressing mode
 int FPUType = 0;
@@ -111,12 +113,22 @@ uint32 ROMSize;					// Size of ROM
 
 extern void timer_atari_set();
 extern void timer_atari_tick(suseconds_t micros);
-extern void AtariScreenUpdate();
-extern bool AtariScreenInfo(int32 mode, bool& native, uint32& mem);
 
 void* operator new(size_t s)
 {
 	void* m = malloc(s);
+	if (m) {
+		memset(m, 0, s);
+	}
+	return m;
+}
+
+void* operator new[](size_t s)
+{
+	void* m = malloc(s);
+	if (m) {
+		memset(m, 0, s);
+	}
 	return m;
 }
 
@@ -130,15 +142,31 @@ char* astrdup(const char* s)
     const char* olds = s;
     size_t len = strlen(olds) + 1;
     char* news = malloc(len);
-    memcpy(news, olds, len);
+	if (news) {
+		strcpy(news, olds);
+	}
 	return news;
 }
 
+#define MAC_START_STACK_SIZE		(64*1024)
+#if MAC_START_STACK_SIZE
+uint8 macStack[MAC_START_STACK_SIZE];
+#endif
+
 void Start680x0()
 {
+#if MAC_START_STACK_SIZE
+	memset(macStack, 0, MAC_START_STACK_SIZE);
+	uint8* stack = macStack + MAC_START_STACK_SIZE - 64;
+#else
+	uint8* stack = RAMBaseHost + 0x8000;
+#endif
+
 	log("Start emulation\n");
-	log("Mac RAM: %08lx\n", RAMBaseHost);
-	log("Mac ROM: %08lx\n", ROMBaseHost);
+	log("Mac RAM: %08lx (%d)\n", RAMBaseHost, RAMSize / 1024);
+	log("Mac ROM: %08lx (%d)\n", ROMBaseHost, ROMSize / 1024);
+	log("Mac SCR: %08lx (%d)\n", ScratchMem, SCRATCH_MEM_SIZE / 1024);
+	log("Mac SP:  %08lx\n", stack);
 
 	if (LogInitOnly)
 		RestoreDebug();
@@ -147,9 +175,10 @@ void Start680x0()
 	timer_atari_set();
 	DisableInterrupts();
 	SetZeroPage(ZEROPAGE_MAC);
-	memset((void*)0, 0x00, 8*1024);
+	void* zeroMem = (void*)0x00000000;
+	memset(zeroMem, 0x00, 8*1024);
 	InitTimers();
-	BootMacintosh();
+	BootMacintosh(stack);
 }
 
 void FlushCache()
@@ -270,6 +299,9 @@ int super_main()
 	if (PrefsFindInt32("modelid") <= 0)
 		PrefsReplaceInt32("modelid", CPUType >= 4 ? 14 : 5);
 
+	// Init zero page
+	InitZeroPage();
+
 	// Show preferences editor
 	InitDebug();
 	if (aesVersion > 0)
@@ -278,8 +310,7 @@ int super_main()
 		{
 			rsrc_gaddr(R_TREE, MENU_MAIN, &RscMenuPtr);
 			menu_bar(RscMenuPtr, 1);
-			bool result = PrefsEditor();
-			if (!result)
+			if (!PrefsEditor())
 				QuitEmulator();
 		}
 		else
@@ -293,7 +324,6 @@ int super_main()
 	FPUType = ((HostFPUType != 0) && PrefsFindBool("fpu")) ? 1 : 0;
 	// todo: software fpu emulation?
 
-
 	// Early exit if no rom file was configured
 	if (!PrefsFindString("rom",0) || (*PrefsFindString("rom",0) == 0))
 	{
@@ -302,8 +332,6 @@ int super_main()
 	}
 
 	// Early exit if no boot disk was configured
-	int32 bootDrive = PrefsFindInt32("bootdrive");
-	int32 bootDriver = PrefsFindInt32("bootdriver");
 	bool haveBootDevice = 
 		(PrefsFindString("floppy", 0)) ||
 		(PrefsFindString("disk", 0)) ||
@@ -366,9 +394,6 @@ int super_main()
 
 	log("IrqSafe: %s\n", TosIrqSafe ? "Yes" : "No");
 
-	// Init system routines
-	SysInit();
-
 	// Open Macintosh ROM
 	char rom_path[32] = "ROM";
 	if (PrefsFindString("rom"))
@@ -428,33 +453,6 @@ int super_main()
 	memset(ScratchMem, 	0, SCRATCH_MEM_SIZE);
 #else
 
-	// Allocate memory.
-	//
-	// todo: determine where to place things in regards to ST/TT ram.
-	// if there is "enough" memory available then all could go into
-	// TT-RAM.
-	// For lower memory machines we may want to be more clever about
-	// where things are being placed.
-	//
-	// The only strict requirement is that the ROM _must_ be 
-	// located in a higher address than RAM.
-	//
-	// we need memory for:
-	//  ram, rom, scratch, disk cache, misc
-	//
-
-
-	// Allocate scratch memory
-	log("Allocating %dKb scratch mem\n", SCRATCH_MEM_SIZE / 1024);
-	ScratchMem = (uint8 *)malloc(SCRATCH_MEM_SIZE);
-	log("ScratchMem = 0x%08x (%d bytes)\n", ScratchMem, SCRATCH_MEM_SIZE);
-	if (ScratchMem == 0) {
-		ErrorAlert(STR_NO_MEM_ERR);
-		QuitEmulator();
-	}
-	memset(ScratchMem, 0, SCRATCH_MEM_SIZE);
-	ScratchMem += SCRATCH_MEM_SIZE/2;	// ScratchMem points to middle of block
-
 	// Create area for Mac RAM and ROM (ROM must be higher in memory,
 	// so we allocate one big chunk and put the ROM at the top of it)
 
@@ -462,13 +460,14 @@ int super_main()
 	static const uint32 ramsizeMin = 512*1024L;			// minimum ram to start
 	//static const uint32 ramsizeMask = 0xfff00000;		// round to 1MB
 	//static const uint32 ramsizeMin = 1024*1024L;			// minimum ram to start
-
 	static const uint32 ramsizeMax = 512 * 1024 * 1024;	// maximum Mac ram
 
+	uint32 freeRam = Mxalloc(-1, 3);
 	uint32 freeRamST = Mxalloc(-1, 0);
 	uint32 freeRamTT = Mxalloc(-1, 1);
 	log("Free ST-RAM: %u\n", freeRamST);
 	log("Free TT-RAM: %u\n", freeRamTT);
+	log("Free Block:  %u\n", freeRam);
 
 	RAMSize = PrefsFindInt32("ramsize");
 	if (RAMSize > 0 && RAMSize < (16 * 1024))
@@ -478,36 +477,57 @@ int super_main()
 	}
 	else if ((RAMSize == 0) || (RAMSize & 0x80000000))
 	{
-		// use largest block of memory available
-		uint32 reserveROM = ROMSize;
-		uint32 reserveMisc = 128 * 1024;
-		uint32 reserveGfx = 0;
-		bool native;
-		AtariScreenInfo(PrefsFindInt32("video_mode"), native, reserveGfx);
-		uint32 reserve = reserveROM + reserveGfx + reserveMisc;
-
-		log("ram reserve %dKb (%d + %d + %d)\n", reserve / 1024, reserveROM / 1024, reserveGfx / 1024, reserveMisc / 1024);
-
-		uint32 ramFree = Mxalloc(-1, 3);
-		log("Free block: %dKb\n", ramFree / 1024);
-		if (ramFree > reserve)
-			RAMSize = (ramFree - reserve) & ramsizeMask;
-		else
-			RAMSize = 0;
+		// use entire block of ram
+		RAMSize = freeRam;
 	}
-	else
-	{
-		// size was specified in bytes
-		RAMSize &= ramsizeMask;
-	}
+	RAMSize &= ramsizeMask;
 
+	// clamp to mac min/max
 	if (RAMSize > ramsizeMax)
 		RAMSize = ramsizeMax;
 	if (RAMSize < ramsizeMin)
 		RAMSize = ramsizeMin;
 
-	log("Allocating Host memory (%d + %d Kb)\n", RAMSize/1024, ROMSize/1024);
-	uint32 hostMemSize = RAMSize + ROMSize + 16;
+	// reserve ram for misc stuff
+	uint32 reserveMisc = 128 * 1024;
+
+	// reserve for graphics emulation
+	bool native;
+	uint32 reserveGfx = 0;					// gfx emulation
+	AtariScreenInfo(PrefsFindInt32("video_mode"), native, reserveGfx);
+
+	// reserve for disk cache
+	if (PrefsFindBool("diskcache") && !isMagic && !isMint)
+	{
+		diskCacheSize = PrefsFindInt32("diskcacheSize");
+		if (diskCacheSize <= 0)
+		{
+			if (freeRam >= (30 * 1024 * 1024))		diskCacheSize = 4 * 1024 * 1024;
+			else if (freeRam >= (14 * 1024 * 1024))	diskCacheSize = 2 * 1024 * 1024;
+			else if (freeRam >= (6 * 1024 * 1024))	diskCacheSize = 1 * 1024 * 1024;
+			else if (freeRam >= (3 * 1024 * 1024))	diskCacheSize = 128 * 1024;		
+			else									diskCacheSize = 0;
+		}
+	}
+
+	uint32 reserveRam = ROMSize + SCRATCH_MEM_SIZE + reserveMisc + reserveGfx + diskCacheSize;
+
+	log("Mem request: %dKb (%d + %d + %d + %d + %d + %d)\n",
+		(RAMSize + reserveRam) / 1024,
+		RAMSize / 1024, ROMSize / 1024, SCRATCH_MEM_SIZE / 1024, reserveMisc / 1024, reserveGfx / 1024, diskCacheSize / 1024);
+
+	if ((RAMSize + reserveRam) > freeRam)
+	{
+		RAMSize = (freeRam > reserveRam) ? ((freeRam - reserveRam) & ramsizeMask) : 0;
+		if (RAMSize < ramsizeMin)
+		{
+			ErrorAlert(STR_NO_MEM_ERR);
+			QuitEmulator();
+		}
+	}
+
+	log("Allocating Host memory (%d + %d + %d Kb)\n", RAMSize/1024, ROMSize/1024, SCRATCH_MEM_SIZE/1024);
+	uint32 hostMemSize = RAMSize + ROMSize + SCRATCH_MEM_SIZE + 16;
 	HostMemChunk = (uint8 *)Mxalloc(hostMemSize, 3);
 	memset(HostMemChunk, 0, hostMemSize);
 	log("HostMemChunk: 0x%08x\n", HostMemChunk);
@@ -518,6 +538,7 @@ int super_main()
 	}
 	RAMBaseHost = (uint8*) (((uint32)(HostMemChunk + 15)) & ~15L);
 	ROMBaseHost = RAMBaseHost + RAMSize;
+	ScratchMem = ROMBaseHost + ROMSize + (SCRATCH_MEM_SIZE / 2);	// ScratchMem points to middle of block
 	RAMBaseMac = (uint32)RAMBaseHost;
 	ROMBaseMac = (uint32)ROMBaseHost;
 #endif
@@ -532,18 +553,25 @@ int super_main()
 	}
 	fclose(rom_fh);
 
+	// Init system routines
+	SysInit();
+
 	// Initialize zero page and vectors.
-	log("Init zero page\n");
-	if (!InitZeroPage())
+	log("Setup zero page\n");
+	if (!SetupZeroPage())
 	{
 		//ErrorAlert(.....)
+		log("InitZeroPage failed\n");
 		QuitEmulator();
 	}
 
 	// Initialize everything
 	log("Init emulation\n");
 	if (!InitAll(0))
+	{
+		log("InitAll failed\n");
 		QuitEmulator();
+	}
 
 	// 68060 specific setup
 	if (HostCPUType == 6)
@@ -606,15 +634,14 @@ int main()
 void QuitEmulator(void)
 {
 	D(bug("QuitEmulator...\n"));
+
 	DisableInterrupts();
-	SetZeroPage(ZEROPAGE_OLD);
-	memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
-	memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+	RestoreZeroPage();
 
 	RestoreDebug();
 	RestoreTimers();
-	FlushCache();
 
+	FlushCache();
 	SetSR(0x2300);
 	RestoreInput();
 
@@ -624,8 +651,6 @@ void QuitEmulator(void)
 	{
 		Mfree(HostMemChunk);
 	}
-	if (ScratchMem)
-		free((void *)(ScratchMem - SCRATCH_MEM_SIZE/2));
 	*/
 
 	ExitAll();
@@ -817,11 +842,13 @@ extern "C" uint16 VecMacExceptionC(trap_regs *r)
 		//uint16 sr = EmulatedSR;
 		//EmulatedSR |= 0x0700;
 		
-#if 1
+#if 0
 		uint16 sr = DisableInterrupts();
-#else		
+#elif 0		
 		uint16 sr = GetSR();
 		SetSR(0x2000);
+#else
+		uint16 sr = GetSR();
 #endif		
 		blockInts++;
 #if EMULOP_DEBUG
@@ -936,12 +963,10 @@ extern "C" void VecTimer2C(uint16 oldsr)
 	static volatile uint32 cntXpram = 0;
 
 	static volatile uint32 trg60 = 0;
-	static volatile uint32 trg200 = 0;
 
 	static const uint32 tck = 49000000/(2457600/50);
 	static const uint32 tck200 = 1000000 / 200;
 	static const uint32 tck60 = 1000000 / 60;
-	static const uint32 tck1 = 1000000 / 1;
 
 #if RESPECT_MAC_IRQLVL
 	const bool macIrqEnable = ((oldsr & 0x700) == 0);

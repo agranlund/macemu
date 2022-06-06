@@ -1,7 +1,9 @@
 
 	.globl _c2p1x1_4_from_8
+	.globl _c2p1x1_4_from_8_060
 
 _c2p1x1_4_from_8:
+_c2p1x1_4_from_8_060:
 	movem.l	d2-d7/a2-a6,-(sp)
 	move.l	44+4(sp),a1							// a1 = planar destination
 	move.l	44+8(sp),a0							// a0 = chunky start

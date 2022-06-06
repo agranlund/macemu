@@ -52,7 +52,6 @@ void *malloc(size_t n)
 		sz = (sz + page_size - 1) & -page_size;
 
 		q = (struct mem_chunk *) Malloc(sz);
-		memset((void*)q, 0, sz);
 		
 		if (q == NULL) /* can't alloc any more? */
 		{

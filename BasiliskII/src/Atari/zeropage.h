@@ -88,6 +88,7 @@
 extern volatile uint16 currentZeroPage;
 
 extern bool InitZeroPage();
+extern bool SetupZeroPage();
 extern void RestoreZeroPage();
 inline uint16 GetZeroPage() { return currentZeroPage; }
 extern "C" uint16 SetZeroPage(uint16 page);
@@ -125,31 +126,41 @@ extern ZeroPageState ZPState[3];
 extern volatile uint16 currentZeroPage;
 
 
+// Helper class for calling bios/xbios from anywhere
+// Temporarily replaces bios save register block (_savptr)
+// The block is 3 * 23 words large
+
+#define TOS_SAV_PTR		((volatile uint32*)0x4a2)
+#define TOS_SAV_SIZE	(12*3)
+#define TOS_SAV_TOTAL	(1 + TOS_SAV_SIZE)
+
 class TOSContext
 {
 public:
-	TOSContext()
+	TOSContext(uint16 sr)
 	{
 		oldSR = DisableInterrupts();
 		oldZP = SetZeroPage(ZEROPAGE_TOS);
-		savptr[0] = *((volatile uint32*)0x4a2);
-		*((volatile uint32*)0x4a2) = &savptr[16];
-		SetSR(0x2500);
+		savptr[0] = *TOS_SAV_PTR;
+		*TOS_SAV_PTR = &savptr[TOS_SAV_TOTAL];
+		SetSR(sr);
 	}
+
 	~TOSContext()
 	{
 		DisableInterrupts();
-		*((volatile uint32*)0x4a2) = savptr[0];
+		*TOS_SAV_PTR = savptr[0];
 		SetZeroPage(oldZP);
 		SetSR(oldSR);
 	}
 private:
 	uint16 oldSR;
 	uint16 oldZP;
-	uint32 savptr[16];
+	uint32 savptr[TOS_SAV_TOTAL];
 };
 
-#define TOS_CONTEXT()	TOSContext tos_context;
+#define TOS_CONTEXT()			TOSContext tos_context(0x2500);
+#define TOS_CONTEXT_NOIRQ(sr)	TOSContext tos_context(0x2700);
 
 
 #endif //ATARI_ZEROPAGE_H

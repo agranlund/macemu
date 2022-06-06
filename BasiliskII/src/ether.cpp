@@ -69,8 +69,11 @@ uint8 ether_addr[6];			// Ethernet address (set by ether_init())
 static bool net_open = false;	// Flag: initialization succeeded, network device open (set by EtherInit())
 
 static bool udp_tunnel = false;	// Flag: tunnelling AppleTalk over UDP using BSD socket API
+
+#if SUPPORTS_UDP_TUNNEL
 static uint16 udp_port;
 static int udp_socket = -1;
+#endif
 
 // Mac address of driver data in MacOS RAM
 uint32 ether_data = 0;

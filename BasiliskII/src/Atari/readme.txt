@@ -14,7 +14,7 @@
   derkom, Badwolf, SWE/YesCREW, Odd Skancke, Miro Kropáček,
   and everyone else who has helped testing this.
  
-  Version: 
+  Version: 220606
 
 --------------------
 License
@@ -56,22 +56,33 @@ Some '030 roms may work but I recommend using a proper 68040 rom.
 --------------------
 Graphics
 --------------------
-Basilisk II supports ST and TT mono resolution.
-(Falcon 16bit mode will work, but the colors are off due
-to Mac and Falcon having different 16bit pixel formats)
 
-Graphics cards are supported and will work as long as the video
-mode is Mac compatible. All Mac video modes have "chunky" pixels.
-1- and 8bit modes will probably work  fine on most cards.
-16bit color requires a big endian RGB555 mode
-32bit color requires a big endian RGB888 mode
+Native:
 
-Graphics card support was mainly been tested on an ET4000 with NVDI5 drivers.
-It has been reported to work on several other cards, and drivers, but your
-milage may vary depending on which card you have, which VDI and driver etc.
+  MacOS can render directly and without emulation to:
+    - ST and TT mono resolutions
+    - Graphics card with a Mac compatible display mode
+      (256 color mode is the safest bet)
 
-I recommend testing 256 color mode first as it seems to be the most compatible
-across the board.
+
+Emulation:
+  BasiliskII will emulate graphics when the screen mode is not
+  directly compatible. This is much slower than native graphics.
+
+  Atari 4bit  -> Mac 4bit + 8bit(*)
+  Atari 8bit  -> Mac 8bit
+  Atari 16bit -> Mac 16bit + 8bit(*)
+  Other 16bit -> Mac 16bit
+
+  (*) These 8bit modes are even slower.
+      For best performance you absolutely want the Atari in 8bit mode too.
+
+  Some special cases:
+    - ST-Low -> Mac 8bit 640x480 (scaled)
+    - TT-Low -> Mac 8bit 640x480 (scaled)
+    - Graphics card set to an incompatible 16bit mode will use emulation
+      to correct the color channels.
+   
 
 
 --------------------
@@ -163,6 +174,15 @@ sound_bits <bits per sample>
   Wanted bits per sample (8 or 16)
   Sound driver may choose another format if your setting is not supported.
 
+video_emu <enable>
+  Enable video emulation support
+
+video_mmu <enable>
+  Enable video emulation MMU acceleration
+
+video_cmp <enable>
+  Enable video emulation compare buffer acceleration
+
 bootdrive <drive number>
   Specify MacOS drive number of boot volume. "0" (the default) means
   "boot from first bootable volume".
@@ -180,6 +200,9 @@ cdrom <CD-ROM drive description>
   This item describes one CD-ROM drive to be used by Basilisk II. There
   can be multiple "cdrom" lines in the preferences file.
   The format of "CD-ROM drive description" is the same as for "disk" lines.
+
+diskcache <enable>
+  Enable disk image cache
 
 disk <volume description>
   This item describes one MacOS volume to be mounted by Basilisk II.

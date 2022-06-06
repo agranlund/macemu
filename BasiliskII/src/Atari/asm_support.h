@@ -71,9 +71,10 @@ struct MMURegs
 extern "C" {
 #endif
 
-extern void BootMacintosh();
+extern void BootMacintosh(uint8* stack);
 extern void ExecuteTosInterrupt(uint16 vec);
 
+extern void VecRts();
 extern void VecRte();
 extern void VecNoHbl();
 extern void VecOriginal();

@@ -27,6 +27,7 @@
 	.globl	_Execute68kTrap
 	.globl	_ExecuteTosInterrupt
 
+	.globl	_VecRts
 	.globl	_VecRte
 	.globl	_VecTosIrq
 	.globl	_VecMacLineA
@@ -61,13 +62,12 @@
 
 
 //--------------------------------------------------------------
-// void BootMacintosh(void)
+// void BootMacintosh(uint8* stack)
 //
 // Set stack in Macintosh RAM and start executing the ROM
 //--------------------------------------------------------------
 _BootMacintosh:
-	move.l	_RAMBaseHost,a0		// stack in mac ram
-	add.l	#0x8000,a0
+	move.l	4(sp),a0
 	move.l	a0,sp
 	move.l	_ROMBaseHost,a0		// jump to mac rom
 	lea		0x2a(a0),a0
@@ -164,6 +164,9 @@ StackFormatTable:
 	dc.w	4*2			// Format 0xd
 	dc.w	4*2			// Format 0xe
 	dc.w	4*2			// Format 0xf
+
+_VecRts:
+	rts
 
 _VecRte:
 	rte

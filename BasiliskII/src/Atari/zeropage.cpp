@@ -60,6 +60,7 @@ extern bool isEmuTos;
 extern bool isMagic;
 extern bool isMint;
 extern uint16 tosVersion;
+extern uint32 ROMSize;
 
 extern "C" uint16 SetZeroPage(uint16 page)
 {
@@ -88,11 +89,6 @@ extern "C" uint16 SetZeroPage(uint16 page)
     return prevZeroPage;
 }
 
-void RestoreZeroPage()
-{
-    SetZeroPage(ZEROPAGE_OLD);
-}
-
 void InitTimers()
 {
     if (timersInited)
@@ -112,42 +108,58 @@ void InitTimers()
     mfpTimerOld[3].ctrl = TIMERD_MASK_CTRL & (*TIMERD_REG_CTRL);
     mfpTimerOld[3].data = *TIMERD_REG_DATA;
 
-
     // timer-A
-    *TIMERA_REG_ENABLE &= ~TIMERA_MASK_ENABLE;
-
-    // timer-B
-    #if TIMERB_200HZ
-        const unsigned char ctrl = 4;   // divide base clock by 64
-        const unsigned char data = 192;	// 200hz ((2457600 / 64) / 192)
-        *TIMERB_REG_ENABLE  |= TIMERB_MASK_ENABLE;
-        *TIMERB_REG_PENDING &= ~TIMERB_MASK_ENABLE;
-        *TIMERB_REG_SERVICE &= ~TIMERB_MASK_ENABLE;
-        *TIMERB_REG_CTRL = (((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | (ctrl << TIMERB_SHIFT_CTRL));
-        *TIMERB_REG_DATA = data;
-        SetMacVector(TIMERB_VECTOR, VecTimer1);
-        SetTosVector(TIMERB_VECTOR, VecTimer1);
-    #else
-        //*TIMERB_REG_ENABLE &= ~TIMERB_MASK_ENABLE;
-    #endif
-
-    // timer-C
     {
-        const unsigned char ctrl = 4;   // divide base clock by 50
-        const unsigned char data = 49;	// 1003hz ((2457600 / 50) / 49)
-        mfpTimerOld[2].en = TIMERC_MASK_ENABLE;
-        mfpTimerOld[2].ctrl = (5 << 4); // divide by 64
-        mfpTimerOld[2].data = 192;      // divie by 192 = 200hz
-        *TIMERC_REG_ENABLE  |= TIMERC_MASK_ENABLE;
-        *TIMERC_REG_PENDING &= ~TIMERC_MASK_ENABLE;
-        *TIMERC_REG_SERVICE &= ~TIMERC_MASK_ENABLE;
-        *TIMERC_REG_CTRL = (((~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL)) | (ctrl << TIMERC_SHIFT_CTRL));
-        *TIMERC_REG_DATA = data;
-        SetMacVector(TIMERC_VECTOR, VecTimer2);
-        SetTosVector(TIMERC_VECTOR, VecTimer2);
+        // audio_atari.cpp installs this timer if needed
+        *TIMERA_REG_ENABLE &= ~TIMERA_MASK_ENABLE;
+        *TIMERA_REG_PENDING &= ~TIMERA_MASK_ENABLE;
+        *TIMERA_REG_SERVICE &= ~TIMERA_MASK_ENABLE;
     }
 
-    // timer-D
+    // timer-B
+    {
+        *TIMERB_REG_ENABLE &= ~TIMERB_MASK_ENABLE;
+        *TIMERB_REG_PENDING &= ~TIMERB_MASK_ENABLE;
+        *TIMERB_REG_SERVICE &= ~TIMERB_MASK_ENABLE;
+        #if TIMERB_200HZ
+            SetMacVector(TIMERB_VECTOR, VecTimer1);
+            SetTosVector(TIMERB_VECTOR, VecTimer1);
+            const unsigned char ctrl = (5 << TIMERB_SHIFT_CTRL);    // divide base clock by 64
+            const unsigned char data = 192;                         // 200 hz ((2457600 / (64 * 192))
+            *TIMERB_REG_CTRL = (((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | (ctrl << TIMERB_SHIFT_CTRL));
+            *TIMERB_REG_DATA = data;
+            *TIMERB_REG_ENABLE  |= TIMERB_MASK_ENABLE;
+        #endif
+    }
+
+    // timer-C (tos system timer)
+    {
+        // used as emulation "thread"
+        *TIMERC_REG_ENABLE &= ~TIMERC_MASK_ENABLE;
+        *TIMERC_REG_PENDING &= ~TIMERC_MASK_ENABLE;
+        *TIMERC_REG_SERVICE &= ~TIMERC_MASK_ENABLE;
+        // params to restore 200hz (2457600 / (64 * 192))
+        mfpTimerOld[2].en = TIMERC_MASK_ENABLE;
+        mfpTimerOld[2].ctrl = (5 << TIMERC_SHIFT_CTRL);
+        mfpTimerOld[2].data = 192;
+        // new vectors
+        SetMacVector(TIMERC_VECTOR, VecTimer2);
+        SetTosVector(TIMERC_VECTOR, VecTimer2);
+        // new params
+        const unsigned char ctrl = (4 << TIMERC_SHIFT_CTRL);    // divide base clock by 50
+        const unsigned char data = 49;                          // 1003hz ((2457600 / (50 * 49))
+        *TIMERC_REG_CTRL = ((~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL)) | ctrl;
+        *TIMERC_REG_DATA = data;
+        *TIMERC_REG_ENABLE  |= TIMERC_MASK_ENABLE;
+    }
+
+    // timer-D (baud rate generator)
+    {
+        // used by debug_atari.cpp, serial_atari.cpp
+        //*TIMERD_REG_ENABLE &= ~TIMERD_MASK_ENABLE;
+        //*TIMERD_REG_PENDING &= ~TIMERD_MASK_ENABLE;
+        //*TIMERD_REG_SERVICE &= ~TIMERD_MASK_ENABLE;
+    }
 
     timersInited = true;
 }
@@ -159,37 +171,45 @@ void RestoreTimers()
 
     timersInited = false;
 
-    // restore timer-A
-    *TIMERA_REG_ENABLE  = (~TIMERA_MASK_ENABLE) & (*TIMERA_REG_ENABLE);
-    *TIMERA_REG_CTRL    = (~TIMERA_MASK_CTRL) & (*TIMERA_REG_CTRL);
-    *TIMERA_REG_PENDING &= ~TIMERA_MASK_ENABLE;
-    *TIMERA_REG_SERVICE &= ~TIMERA_MASK_ENABLE;
-    //*TIMERA_REG_MASK    &= ~TIMERC_MASK_ENABLE;
-    *TIMERA_REG_DATA    = mfpTimerOld[0].data;
-    *TIMERA_REG_CTRL    |= mfpTimerOld[0].ctrl;
-    *TIMERA_REG_ENABLE  |= mfpTimerOld[0].en;
+    // timer-A
+    {
+        *TIMERA_REG_ENABLE  = (~TIMERA_MASK_ENABLE) & (*TIMERA_REG_ENABLE);
+        *TIMERA_REG_PENDING &= ~TIMERA_MASK_ENABLE;
+        *TIMERA_REG_SERVICE &= ~TIMERA_MASK_ENABLE;
+        *TIMERA_REG_CTRL = ((~TIMERA_MASK_CTRL) & (*TIMERA_REG_CTRL)) | mfpTimerOld[0].ctrl;
+        *TIMERA_REG_DATA = mfpTimerOld[0].data;
+        *TIMERA_REG_ENABLE  |= mfpTimerOld[0].en;
+    }
 
     // timer-B
-    #if TIMERB_200HZ
-        *TIMERB_REG_ENABLE  = (~TIMERB_MASK_ENABLE) & (*TIMERB_REG_ENABLE);
-        *TIMERB_REG_ENABLE  = ((~TIMERB_MASK_ENABLE) & (*TIMERB_REG_ENABLE)) | mfpTimerOld[1].en;
-        *TIMERB_REG_CTRL    = ((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | mfpTimerOld[1].ctrl;
-        *TIMERB_REG_DATA    = mfpTimerOld[1].data;
+    {
+        *TIMERB_REG_ENABLE = (~TIMERB_MASK_ENABLE) & (*TIMERB_REG_ENABLE);
         *TIMERB_REG_PENDING &= ~TIMERB_MASK_ENABLE;
         *TIMERB_REG_SERVICE &= ~TIMERB_MASK_ENABLE;
-        *TIMERB_REG_MASK    &= ~TIMERB_MASK_ENABLE;
-        *TIMERB_REG_ENABLE  = mfpTimerOld[1].en;
-    #endif
+        *TIMERB_REG_CTRL = ((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | mfpTimerOld[1].ctrl;
+        *TIMERB_REG_DATA = mfpTimerOld[1].data;
+        *TIMERB_REG_ENABLE  |= mfpTimerOld[1].en;
+    }
 
-    // restore timer-C
-    *TIMERC_REG_ENABLE  = (~TIMERC_MASK_ENABLE) & (*TIMERC_REG_ENABLE);
-    *TIMERC_REG_CTRL    = (~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL);
-    *TIMERC_REG_PENDING &= ~TIMERC_MASK_ENABLE;
-    *TIMERC_REG_SERVICE &= ~TIMERC_MASK_ENABLE;
-    //*TIMERC_REG_MASK    &= ~TIMERC_MASK_ENABLE;
-    *TIMERC_REG_DATA    = mfpTimerOld[2].data;
-    *TIMERC_REG_CTRL    |= mfpTimerOld[2].ctrl;
-    *TIMERC_REG_ENABLE  |= mfpTimerOld[2].en;
+    // timer-C
+    {
+        *TIMERC_REG_ENABLE  = (~TIMERC_MASK_ENABLE) & (*TIMERC_REG_ENABLE);
+        *TIMERC_REG_PENDING &= ~TIMERC_MASK_ENABLE;
+        *TIMERC_REG_SERVICE &= ~TIMERC_MASK_ENABLE;
+        *TIMERC_REG_CTRL    = ((~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL)) | mfpTimerOld[2].ctrl;
+        *TIMERC_REG_DATA    = mfpTimerOld[2].data;
+        *TIMERC_REG_ENABLE  |= mfpTimerOld[2].en;
+    }
+
+    // timer-D
+    {
+        *TIMERD_REG_ENABLE  = (~TIMERD_MASK_ENABLE) & (*TIMERD_REG_ENABLE);
+        *TIMERD_REG_PENDING &= ~TIMERD_MASK_ENABLE;
+        *TIMERD_REG_SERVICE &= ~TIMERD_MASK_ENABLE;
+        *TIMERD_REG_CTRL    = ((~TIMERD_MASK_CTRL) & (*TIMERD_REG_CTRL)) | mfpTimerOld[3].ctrl;
+        *TIMERD_REG_DATA    = mfpTimerOld[3].data;
+        *TIMERD_REG_ENABLE  |= mfpTimerOld[3].en;
+    }
 }
 
 void SetMacVector(uint16 v, uint32 f)
@@ -202,15 +222,29 @@ void SetTosVector(uint16 v, uint32 f)
     vbrTableTos[v>>2] = f;
 }
 
-
 bool InitZeroPage()
 {
-    D(bug("Setting up VBR\n"));
     currentZeroPage = ZEROPAGE_OLD;
-    uint32* oldVbr = GetVBR();
+    ZPState[ZEROPAGE_OLD].vbr = GetVBR();
+    ZPState[ZEROPAGE_OLD].cacr = GetCACR();
+    GetMMU(&ZPState[ZEROPAGE_OLD].mmu);
+    memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+    memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+    return true;
+}
+
+void RestoreZeroPage()
+{
+    SetZeroPage(ZEROPAGE_OLD);
+    memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+    memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+}
+
+bool SetupZeroPage()
+{
+    D(bug("Setting up VBR\n"));
     uint32* tosVbr = vbrTableTos;
     uint32* macVbr = vbrTableMac;
-    ZPState[ZEROPAGE_OLD].vbr = oldVbr;
     ZPState[ZEROPAGE_TOS].vbr = tosVbr;
     ZPState[ZEROPAGE_MAC].vbr = macVbr;
 
@@ -218,9 +252,15 @@ bool InitZeroPage()
     D(bug(" tosVbr = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr));
     D(bug(" macVbr = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr));
 
-    ZPState[ZEROPAGE_OLD].cacr = GetCACR();
-    ZPState[ZEROPAGE_TOS].cacr = GetCACR();
-    ZPState[ZEROPAGE_MAC].cacr = GetCACR();
+    if ((HostCPUType >= 4) && (ROMSize < (1024 * 1024)))
+    {
+        D(bug("Disabling cpu cache (512k ROM on 68040+)\n"));
+        SetCACR(0);
+    }
+
+    uint32 cacr = GetCACR();
+    ZPState[ZEROPAGE_TOS].cacr = cacr;
+    ZPState[ZEROPAGE_MAC].cacr = cacr;
 
 #if CACR_OVERRIDE
     #if CACR_RESPECT_MAC
@@ -311,9 +351,6 @@ bool InitZeroPage()
     //---------------------------------------------------------------------
     //  MMU
     //---------------------------------------------------------------------
-    D(bug("Get TOS MMU config\n"));
-    GetMMU(&ZPState[ZEROPAGE_OLD].mmu);
-    GetMMU(&ZPState[ZEROPAGE_TOS].mmu);
     if (HostCPUType >= 4)
     {
         D(bug(" Original:\n"));
@@ -363,8 +400,8 @@ bool InitZeroPage()
 
 
     D(bug("Flushing cache\n"));
-    SetCACR(ZPState[ZEROPAGE_OLD].cacr);
-    D(bug("ZeroPage Init complete\n"));
+    SetCACR(ZPState[ZEROPAGE_TOS].cacr);
+    D(bug("ZeroPage setup complete\n"));
     return true;
 }
 

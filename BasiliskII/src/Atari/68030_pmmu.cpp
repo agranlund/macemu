@@ -62,31 +62,32 @@ void pmmu_68030_init()
     const uint32 num_tic_tables = (1 << tic_bits) * num_tib_tables;
     const uint32 num_tid_tables = 1;
 
-    const uint32 table_size = 
-        ((1 << tia_bits) * num_tia_tables) +
-        ((1 << tib_bits) * num_tib_tables) +
-        ((1 << tic_bits) * num_tic_tables) +
-        ((1 << tid_bits) * num_tid_tables);
+    const uint32 tia_size = ((1 << tia_bits) * num_tia_tables);
+    const uint32 tib_size = ((1 << tib_bits) * num_tib_tables);
+    const uint32 tic_size = ((1 << tic_bits) * num_tic_tables);
+    const uint32 tid_size = ((1 << tid_bits) * num_tid_tables);
+
+    const uint32 table_size = 4 * (tia_size + tib_size + tic_size + tid_size);
 
     const uint32 zeroSize = (8 * 1024);
     const uint32 pageSize = MMU030_PAGESIZE;
-    const uint32 memSize = zeroSize + (table_size * 4) + pageSize;
-    char* mem = (char*) Malloc(memSize);
+    const uint32 memSize = 4096 + zeroSize + table_size;
+    char* mem = (char*) Mxalloc(memSize, 3);
     memset(mem, 0, memSize);
-    char* zeroPhys = (char*) ((((uint32)mem) + (pageSize-1)) & ~(pageSize-1));
+    char* zeroPhys = (char*) ((((uint32)mem) + 4095) & ~4095L);
 
     //  0 : TIA : X.......
     tia = (uint32*) (zeroPhys + zeroSize);
-    tib = tia + ((1 << tia_bits) * num_tia_tables);
-    tic = tib + ((1 << tib_bits) * num_tib_tables);
-    tid = tic + ((1 << tic_bits) * num_tic_tables);
+    tib = tia + tia_size;
+    tic = tib + tib_size;
+    tid = tic + tic_size;
 
-    D(bug("   mem  = 0x%08x\n", mem));
-    D(bug("   zero = 0x%08x\n", zeroPhys));
-    D(bug("   tia = 0x%08x\n", tia));
-    D(bug("   tib = 0x%08x\n", tib));
-    D(bug("   tic = 0x%08x\n", tic));
-    D(bug("   tid = 0x%08x\n", tid));
+    D(bug("   mem  = 0x%08x (%d)\n", mem, memSize));
+    D(bug("   zero = 0x%08x (%d)\n", zeroPhys, zeroSize));
+    D(bug("   tia = 0x%08x (%d, %d)\n", tia, num_tia_tables, 4 * tia_size));
+    D(bug("   tib = 0x%08x (%d, %d)\n", tib, num_tib_tables, 4 * tib_size));
+    D(bug("   tic = 0x%08x (%d, %d)\n", tic, num_tic_tables, 4 * tic_size));
+    D(bug("   tid = 0x%08x (%d, %d)\n", tid, num_tid_tables, 4 * tid_size));
 
     // default table
     for (uint16 i=0; i<(1<<tia_bits); i++)
@@ -103,24 +104,6 @@ void pmmu_68030_init()
         }
     }
 
-    /*
-    // default tia
-    for (uint16 i=0; i<(1<<tia_bits); i++)
-        TIA(0, i) = uint32(&TIB(i, 0)) | MMU_TABLE;
-//        TIA(0, i) = (i << (32 - tia_bits)) | MMU_PAGE;
-
-    // default tibs
-    for (uint16 i=0; i<(1<<tia_bits); i++)
-        for (uint16 j=0; j<(1<<tib_bits); j++)
-            TIB(i,j) = uint32(&TIC(i*(1<<tia_bits) + j, 0)) | MMU_TABLE;
-//            TIB(i, j) = (i << (32 - tia_bits)) | (j << (32-(tia_bits + tib_bits))) | MMU_PAGE;
-
-    // default tics
-    for (uint16 i=0; i<(1<<(tia_bits+tib_bits)); i++)
-        for (uint16 j=0; j<(1<<tic_bits); j++)
-            TIC(i, j) = (i << (32-(tia_bits-tib_bits))) | (j << (32-(tia_bits+tib_bits+tic_bits))) | MMU_PAGE;
-    */
-
     TIA(0, 0) = (uint32)(&TIB(0,0)) | MMU_TABLE;
     TIA(0, 8) = 0x80000000UL  | MMU_PAGE | MMU_CI;
     TIA(0, 9) = 0x90000000UL  | MMU_PAGE | MMU_CI;
@@ -134,83 +117,22 @@ void pmmu_68030_init()
     TIB(0, 0)  = (uint32)(&TIC(0,0)) | MMU_TABLE;   // 00...... -> 00x.....
     TIB(15,15) = (uint32)(&TIC(0,0)) | MMU_TABLE;   // FF...... -> 00x.....
     TIC(0, 0)  = (uint32)(&TID(0,0)) | MMU_TABLE;   // 000..... -> 000x....
+    TIC(0, 1)  = TIC(0,1) | MMU_CI;     // 0x001xxxxx
+    TIC(0, 2)  = TIC(0,2) | MMU_CI;     // 0x002xxxxx
+    TIC(0, 3)  = TIC(0,3) | MMU_CI;     // 0x003xxxxx
+    TIC(0, 4)  = TIC(0,4) | MMU_CI;     // 0x004xxxxx
+    TIC(0, 5)  = TIC(0,5) | MMU_CI;     // 0x005xxxxx
+    TIC(0, 6)  = TIC(0,6) | MMU_CI;     // 0x006xxxxx
+    TIC(0, 7)  = TIC(0,7) | MMU_CI;     // 0x007xxxxx
+    TIC(0, 8)  = TIC(0,8) | MMU_CI;     // 0x008xxxxx
+    TIC(0, 9)  = TIC(0,9) | MMU_CI;     // 0x009xxxxx
+    TIC(0, 10)  = TIC(0,10) | MMU_CI;   // 0x00Axxxxx
+    TIC(0, 11)  = TIC(0,11) | MMU_CI;   // 0x00Bxxxxx
+    TIC(0, 12)  = TIC(0,12) | MMU_CI;   // 0x00Cxxxxx
+    TIC(0, 13)  = TIC(0,13) | MMU_CI;   // 0x00Dxxxxx
+    //TIC(0, 14)  = TIC(0,14) | MMU_CI;   // 0x00Exxxxx
+    TIC(0, 15)  = TIC(0,15) | MMU_CI;   // 0x00Fxxxxx
 
-
-/*
-
-    // tia
-    TIA(0, 0) = (uint32)(&TIB(0,0)) | MMU_TABLE;
-    TIA(0, 1) = 0x10000000UL  | MMU_PAGE;
-    TIA(0, 2) = 0x20000000UL  | MMU_PAGE;
-    TIA(0, 3) = 0x30000000UL  | MMU_PAGE;
-    TIA(0, 4) = 0x40000000UL  | MMU_PAGE;
-    TIA(0, 5) = 0x50000000UL  | MMU_PAGE;
-    TIA(0, 6) = 0x60000000UL  | MMU_PAGE;
-    TIA(0, 7) = 0x70000000UL  | MMU_PAGE;
-    TIA(0, 8) = 0x80000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0, 9) = 0x90000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,10) = 0xA0000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,11) = 0xB0000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,12) = 0xC0000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,13) = 0xD0000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,14) = 0xE0000000UL  | MMU_PAGE | MMU_CI;
-    TIA(0,15) = (uint32)(&TIB(15,0)) | MMU_TABLE;
-
-
-    // tib0
-    TIB(0, 0) = (uint32)(&TIC(0,0)) | MMU_TABLE;  // 00...... -> 00x.....
-    TIB(0, 1) = 0x01000000UL  | MMU_PAGE;
-    TIB(0, 2) = 0x02000000UL  | MMU_PAGE;
-    TIB(0, 3) = 0x03000000UL  | MMU_PAGE;
-    TIB(0, 4) = 0x04000000UL  | MMU_PAGE;
-    TIB(0, 5) = 0x05000000UL  | MMU_PAGE;
-    TIB(0, 6) = 0x06000000UL  | MMU_PAGE;
-    TIB(0, 7) = 0x07000000UL  | MMU_PAGE;
-    TIB(0, 8) = 0x08000000UL  | MMU_PAGE;
-    TIB(0, 9) = 0x09000000UL  | MMU_PAGE;
-    TIB(0,10) = 0x0A000000UL  | MMU_PAGE;
-    TIB(0,11) = 0x0B000000UL  | MMU_PAGE;
-    TIB(0,12) = 0x0C000000UL  | MMU_PAGE;
-    TIB(0,13) = 0x0D000000UL  | MMU_PAGE;
-    TIB(0,14) = 0x0E000000UL  | MMU_PAGE;
-    TIB(0,15) = 0x0F000000UL  | MMU_PAGE;
-
-    // tib15
-    TIB(15, 0) = 0xF0000000UL  | MMU_PAGE;
-    TIB(15, 1) = 0xF1000000UL  | MMU_PAGE;
-    TIB(15, 2) = 0xF2000000UL  | MMU_PAGE;
-    TIB(15, 3) = 0xF3000000UL  | MMU_PAGE;
-    TIB(15, 4) = 0xF4000000UL  | MMU_PAGE;
-    TIB(15, 5) = 0xF5000000UL  | MMU_PAGE;
-    TIB(15, 6) = 0xF6000000UL  | MMU_PAGE;
-    TIB(15, 7) = 0xF7000000UL  | MMU_PAGE;
-    TIB(15, 8) = 0xF8000000UL  | MMU_PAGE;
-    TIB(15, 9) = 0xF9000000UL  | MMU_PAGE;
-    TIB(15,10) = 0xFA000000UL  | MMU_PAGE;
-    TIB(15,11) = 0xFB000000UL  | MMU_PAGE;
-    TIB(15,12) = 0xFC000000UL  | MMU_PAGE;
-    TIB(15,13) = 0xFD000000UL  | MMU_PAGE;
-    TIB(15,14) = 0xFE000000UL  | MMU_PAGE;
-    TIB(15,15) = (uint32)(&TIC(0,0)) | MMU_TABLE; // FF...... -> 00x.....
-
-    // tic0
-    TIC(0, 0) = (uint32)(&TID(0,0)) | MMU_TABLE;   // 000..... -> 000x....
-    TIC(0, 1) = 0x00100000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 2) = 0x00200000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 3) = 0x00300000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 4) = 0x00400000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 5) = 0x00500000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 6) = 0x00600000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 7) = 0x00700000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 8) = 0x00800000UL  | MMU_PAGE | MMU_CI;
-    TIC(0, 9) = 0x00900000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,10) = 0x00A00000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,11) = 0x00B00000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,12) = 0x00C00000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,13) = 0x00D00000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,14) = 0x00E00000UL  | MMU_PAGE | MMU_CI;
-    TIC(0,15) = 0x00F00000UL  | MMU_PAGE | MMU_CI;
-*/
     // tid0
     uint32* tidptr = &TID(0,0);
     uint32 pageAddress = 0;
@@ -226,7 +148,6 @@ void pmmu_68030_init()
     ZPState[ZEROPAGE_MAC].mmu.m030.crp[0] = 0x80000002;  //
     ZPState[ZEROPAGE_MAC].mmu.m030.crp[1] = tia;         //
     ZPState[ZEROPAGE_MAC].mmu.m030.ttr0 = 0x017e8107;    // 0x01000000-0x7FFFFFFF
-    //ZPState[ZEROPAGE_MAC].mmu.m030.ttr0 = 0x017e0107;    // 0x01000000-0x7FFFFFFF
     ZPState[ZEROPAGE_MAC].mmu.m030.ttr1 = 0x807e8507;    // 0x80000000-0xFEFFFFFF (CI)
     const uint32 ps_bits = 32 - is_bits - tia_bits - tib_bits - tic_bits - tid_bits;
     ZPState[ZEROPAGE_MAC].mmu.m030.tc =
@@ -245,7 +166,9 @@ uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag
 {
     // align to pagesize
     size = (size + (pagesize - 1)) & ~(pagesize - 1);
-    uint16 numpages = size / pagesize;
+    uint32 st = logaddr / pagesize;
+    uint32 en = (logaddr + size) / pagesize;
+    uint16 numpages = en - st;
         
     logaddr = (uint32*) (logaddr & ~(pagesize - 1));
     physaddr = (uint32*) (physaddr & ~(pagesize - 1));
@@ -263,7 +186,7 @@ uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag
         numtics = 1;
 
     uint32 tidmemsize = (numtics * (1 << tid_bits)) << 2;
-    uint32* tidmembase = (uint32*)((((uint32)malloc(4096 + tidmemsize)) + 4095) & ~4095L);
+    uint32* tidmembase = (uint32*)((((uint32)Mxalloc(4096 + tidmemsize, 3)) + 4095) & ~4095L);
     uint32* tidmem = tidmembase;
     uint32* returnptr = &tidmem[(logaddr >> tid_shift) & ((1 << tid_bits)-1)];
 

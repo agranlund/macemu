@@ -24,6 +24,7 @@
 #include "user_strings.h"
 #include "gem.h"
 #include "basilisk.h"
+#include "video_atari.h"
 #include "vdi_userdef.h"
 #include "mint/mintbind.h"
 #include "mint/cookie.h"
@@ -31,8 +32,6 @@
 
 #define DEBUG 1
 #include "debug.h"
-
-extern bool AtariScreenInfo(int32 mode, bool& native, uint32& mem);
 
 extern int HostCPUType;
 extern int HostFPUType;
@@ -130,10 +129,9 @@ public:
 	{
 		if (handle)
 		{
-			if (isopen)
-				wind_close(handle);
+			Close();
 			wind_delete(handle);
-			handle = -1;
+			handle = 0;
 		}
 	}
 
@@ -236,7 +234,8 @@ static void update_sound(bool nosound, int32 driver)
 static void update_video()
 {
 	int32 modeidx = 0;
-	int32 mode = 0; //PrefsFindInt32("video_mode");
+	int32 modemax = MENU_GFX_MODE_CUR;
+	int32 mode = PrefsFindInt32("video_mode");
 	switch(mode)
 	{
 		case 1: modeidx = MENU_GFX_MODE_1B; break;
@@ -245,6 +244,41 @@ static void update_video()
 		case 16: modeidx = MENU_GFX_MODE_16B; break;
 		default: modeidx = MENU_GFX_MODE_CUR; break;
 	}
+#if 0
+	// GUI option is disabled until rez change is working correctly
+	// in all combinations of TOS/AES/VDI
+	ScreenDesc scr;
+	if (QueryScreen(scr))
+	{
+		switch (scr.hw)
+		{
+			case HW_SHIFTER_ST:
+			case HW_SHIFTER_STE:
+				modemax = MENU_GFX_MODE_4B;
+				break;
+			case HW_SHIFTER_TT:
+				modemax = MENU_GFX_MODE_8B;
+				break;
+			case HW_VIDEL:
+				//modemax = MENU_GFX_MODE_16B;
+				break;
+		}
+	}
+#endif
+	for (uint16 i = MENU_GFX_MODE_CUR; i<=modemax; i++)
+	{
+		menu_ienable(menu, i, 1);
+		menu_icheck(menu, i, 0);
+	}
+	for (uint16 i = (modemax + 1); i <= MENU_GFX_MODE_16B; i++)
+	{
+		menu_ienable(menu, i, 0);
+		menu_icheck(menu, i, 0);
+	}
+	if (modeidx > modemax)
+		modeidx = MENU_GFX_MODE_CUR;
+
+	menu_icheck(menu, modeidx, 1);
 
 	bool emu = PrefsFindBool("video_emu");
 	bool mmu = PrefsFindBool("video_mmu");
@@ -254,26 +288,6 @@ static void update_video()
 	menu_icheck(menu, MENU_GFX_CMPACCEL, (/*emu &&*/ cmp) ? 1 : 0);
 	menu_ienable(menu, MENU_GFX_MMUACCEL, emu ? 1 : 0);
 	menu_ienable(menu, MENU_GFX_CMPACCEL, emu ? 1 : 0);
-#if 1
-	for (uint16 i = MENU_GFX_MODE_1B; i<=MENU_GFX_MODE_16B; i++)
-		menu_ienable(menu, i, 0);
-#else
-	bool native; uint32 mem;
-	menu_ienable(menu, MENU_GFX_MODE_CUR, (AtariScreenInfo(0, native, mem) && (native || emu)) ? 1 : 0);
-	menu_ienable(menu, MENU_GFX_MODE_1B, (AtariScreenInfo(1, native, mem) && (native || emu)) ? 1 : 0);
-	menu_ienable(menu, MENU_GFX_MODE_4B, (AtariScreenInfo(4, native, mem) && (native || emu)) ? 1 : 0);
-	menu_ienable(menu, MENU_GFX_MODE_8B, (AtariScreenInfo(8, native, mem) && (native || emu)) ? 1 : 0);
-	menu_ienable(menu, MENU_GFX_MODE_16B, (AtariScreenInfo(16, native, mem) && (native || emu)) ? 1 : 0);
-	for (uint16 i=MENU_GFX_MODE_CUR; i<=MENU_GFX_MODE_16B; i++)
-		menu_icheck(menu, i, 0);
-
-	if ((AtariScreenInfo(mode, native, mem) && (native || emu)) == false)
-	{
-		modeidx = MENU_GFX_MODE_1B;
-		PrefsReplaceInt32("video_mode", 1);
-	}
-#endif
-	menu_icheck(menu, modeidx, 1);
 }
 
 static const char* update_logmode(int16 mode)
@@ -326,10 +340,11 @@ bool PrefsEditor(void)
 	menu = RscMenuPtr;
 	menu_bar(menu, 1);
 
-	char* tempdata = malloc(16*1024);
+	const uint32 tempdatasize = 16 * 1024;
+	char* tempdata = Malloc(tempdatasize);
 	if (tempdata == 0)
 		return false;
-	memset(tempdata, 0, 16*1024);
+	memset(tempdata, 0, tempdatasize);
 	char* fselpath = tempdata;
 	char* fselname = fselpath + 256;
 	char* cpuString = fselname + 256;
@@ -403,7 +418,7 @@ bool PrefsEditor(void)
 	windows[1] = NULL;
 	wndMain.Open();
 
-	graf_mouse(ARROW, NULL);
+	graf_mouse(ARROW, 0);
 
 	int16 done = 0;
 	while (done == 0)
@@ -711,7 +726,7 @@ bool PrefsEditor(void)
 									{
 										int16 result = 0;
 										sprintf(fselpath, "*.ROM");
-										sprintf(fselname, "");
+										fselname[0] = 0;
 										wind_update(BEG_MCTRL);
 										if (fsel_exinput(fselpath, fselname, &result, "Select Macintosh ROM") == 0)
 											result = 0;
@@ -756,15 +771,8 @@ bool PrefsEditor(void)
 	SavePrefs();
 	D(bug("Cleanup\n"));
 	for (uint16 i=0; windows[i] != NULL; i++)
-	{
-		if (windows[i]->handle)
-		{
-			if (windows[i]->isopen)
-				wind_close(windows[i]->handle);
-			wind_delete(windows[i]->handle);
-		}
-	}
+		windows[i]->Destroy();
 	D(bug("Exiting Prefs editor\n"));
-	free(tempdata);
+	Mfree(tempdata);
 	return (done > 0);
 }

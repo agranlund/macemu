@@ -179,7 +179,7 @@ static void print_options(const prefs_desc *list)
 					break;
 				case TYPE_INT32:
 					typestr = "NUMBER";
-					sprintf(numstr, "%d", PrefsFindInt32(list->name));
+					sprintf(numstr, "%ld", PrefsFindInt32(list->name));
 					defstr = numstr;
 					break;
 				default:
@@ -477,7 +477,7 @@ static void write_prefs(FILE *f, const prefs_desc *list)
 				break;
 			case TYPE_INT32:
 				if (PrefsExist(list->name))
-					fprintf(f, "%s %d\n", list->name, PrefsFindInt32(list->name));
+					fprintf(f, "%s %ld\n", list->name, PrefsFindInt32(list->name));
 				break;
 			default:
 				break;

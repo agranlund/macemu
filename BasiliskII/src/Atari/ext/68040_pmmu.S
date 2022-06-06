@@ -16,6 +16,10 @@
 
         .arch   68040
 
+#define TABLE_STRAM     0
+#define TABLE_NOCACHE   1
+
+
 //Translate control register bit meanings
 tc_enable       = 15    //Translation Enable (0 = disabled)
 
@@ -47,17 +51,25 @@ MEMORY_SIZE_IO2     = 1024*1024
 
         .text
 
-_balloc_stram:
+_balloc_table:
         move.l  4(sp),d0                        // size
-        addq.l  #3,d0
+        add.l   #4095,d0
+        and.l   #0xFFFFF000,d0                  // alloc in chunks of 4096
+        move.l  d0,table_mem_size
+        add.l   #4095,d0                        // padding
         movem.l d1-d3/a0-a3,-(sp)
+#if TABLE_STRAM        
+        move.w  #0,-(sp)                        // must be st-ram
+#else
         move.w  #3,-(sp)                        // prefer tt-ram
+#endif
         move.l  d0,-(sp)                        // size
         move.w  #68,-(sp)                       // Mxalloc
         trap    #1
         addq.l  #8,sp
-        addq.l  #3,d0                           // align to 4 byte boundary
-        and.l   #0xFFFFFFFC,d0
+        add.l   #4095,d0
+        and.l   #0xFFFFF000,d0                  // align to 4096 byte boundary
+        move.l  d0,table_mem_start
         movem.l (sp)+,d1-d3/a0-a3
         rts
 
@@ -113,7 +125,7 @@ no_ttram1:
 
         clr.w   -(sp)                   // FALSE
         move.l  d0,-(sp)
-        jsr     _balloc_stram
+        jsr     _balloc_table
         addq.l  #6,sp
 
         add.l   #~msk_rootp_addr,d0
@@ -246,6 +258,15 @@ no_ttram2:
         jbsr    create_table
         jcc     .error
 
+#if TABLE_NOCACHE
+        // PMMU table
+        move.l  table_mem_start,d0
+        move.l  table_mem_start,d1
+        move.l  table_mem_size,d2
+        move.l  #c_precise<<d_cache_pos,d3
+        jbsr    create_table
+        jcc     .error
+#endif
         or.b    #1,ccr
         rts
 .error:
@@ -407,18 +428,6 @@ create_pointertable:
         rts
 
 
-        // Zero page
-        move.l  #0x00000000,d0                          // logical
-        move.l  #zpbuffer,d1                            // physical
-        add.l   #4095,d1
-        and.l   #0xFFFFF000,d1
-        move.l  #MEMORY_SIZE_ZERO,d2                    // size
-        move.l  #c_writetrough<<d_cache_pos,d3          // flags
-        jbsr    create_table
-        jcc     .error
-
-
-
 _pmmu_68040_get_pagetable:
         movem.l d1-d7/a0-a6,-(sp)       //7+7 = 14*4 = 56
         move.l  56+4(sp),d0             // d0 = log
@@ -448,6 +457,9 @@ _pmmu_68040_get_pagetable:
 
                 .bss
                 .even
+
+table_mem_start: .ds.l 1
+table_mem_size:  .ds.l 1
 
 root_table:     .ds.l 1
 next_free_ptr:  .ds.l 1

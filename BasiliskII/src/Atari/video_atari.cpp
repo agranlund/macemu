@@ -28,29 +28,54 @@
 #include "video_defs.h"
 #include "zeropage.h"
 #include "macos_util.h"
+#include "video_atari.h"
 #include "input_atari.h"
 #include "mint/cookie.h"
 
 #define DEBUG 1
 #include "debug.h"
 
-
-#define FALCON_CONSIDER_STPAL	0
 #define SUPPORT_8ON16BIT		1
-#define ENABLE_VIDEODEBUG		1
-
+#define ENABLE_VIDEODEBUG		0
 #define DEBUG_MMU				0
+
+#define DBGFLAG_FORCE_REDRAW	(1<<0)
+#define DBGFLAG_NO_HWPAL		(1<<1)
+#define DBGFLAG_NO_VDIPAL		(1<<2)
+#define DBGFLAG_NO_CLEAR		(1<<4)
+#define DBGFLAG_NO_EARLY_UPDATE	(1<<5)
+#define DBGFLAG_NO_UPDATE		(1<<6)
+#define DBGFLAG_NO_INPUT		(1<<7)
+#define DBGFLAG_CACHE_FLUSH1	(1<<8)
+#define DBGFLAG_CACHE_FLUSH2	(1<<9)
+
+
+static const char* videoHwStrings[] =
+{
+	"ST-Shifter",
+	"STE-Shifter",
+	"TT-Shifter",
+	"Videl",
+	"Gfxcard",
+	"SuperVidel"
+};
+
+typedef void (*blit_func)(uint8* src, uint8* dst, uint32 size, uint8* pal);
 
 extern uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag);
 extern "C" uint32* pmmu_68040_get_pagetable(uint32 logaddr);
 
 extern "C" {
-void c2p1x1_8_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 8bit
-void c2p1x1_8_from_8_halfx(uint8*dst, uint8* src, uint32 size, uint8* pal);		// Apple 8bit -> Atari 8bit, half width
-void c2p1x1_8_from_8_halfx_060(uint8*dst, uint8* src, uint32 size, uint8* pal);	// Apple 8bit -> Atari 8bit, half width (68060)
-void c2p1x1_4_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 4bit
-void c2p1x1_4_from_8_halfx(uint8* dst, uint8* src, uint32 size, uint8* pal);	// Apple 8bit -> Atari 4bit, half width
-void c2p1x1_4_from_4(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 4bit -> Atari 4bit
+void c2p1x1_8_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 8bit -> Atari 8bit
+void c2p1x1_8_from_8_halfx(uint8*dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 8bit, half width
+void c2p1x1_4_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 8bit -> Atari 4bit
+void c2p1x1_4_from_8_halfx(uint8* dst, uint8* src, uint32 size, uint8* pal);		// Apple 8bit -> Atari 4bit, half width
+void c2p1x1_4_from_4(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 4bit -> Atari 4bit
+void c2p1x1_8_from_8_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 8bit
+void c2p1x1_8_from_8_060_halfx(uint8*dst, uint8* src, uint32 size, uint8* pal);		// Apple 8bit -> Atari 8bit, half width
+void c2p1x1_4_from_8_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 4bit
+void c2p1x1_4_from_8_060_halfx(uint8* dst, uint8* src, uint32 size, uint8* pal);	// Apple 8bit -> Atari 4bit, half width
+void c2p1x1_4_from_4_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 4bit -> Atari 4bit
 };
 
 void rgb555le_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
@@ -136,71 +161,6 @@ void rgb565be_from_8bit(uint8* dst, uint8* src, uint32 size, uint8* pal)
 	}
 }
 
-
-typedef void (*blit_func)(uint8* src, uint8* dst, uint32 size, uint8* pal);
-
-#define PF_BITS_1		( 1 << 0)
-#define PF_BITS_2		( 2 << 0)
-#define PF_BITS_4		( 4 << 0)
-#define PF_BITS_8		( 8 << 0)
-#define PF_BITS_16		(16 << 0)
-#define PF_BITS_24		(24 << 0)
-#define PF_BITS_32		(32 << 0)
-#define PF_MASK_BITS	(31 << 0)
-
-#define PF_PL_CHUNKY	(0 << 6)		// chunky
-#define PF_PL_ATARI		(1 << 6)		// interleaved planes
-#define PF_PL_AMIGA		(3 << 6)		// separate planes
-#define PF_MASK_PL		(3 << 6)
-
-#define PF_ENDIAN_BE	(0 << 8)		// big endian
-#define PF_ENDIAN_LE	(1 << 8)		// little endian
-#define PF_MASK_ENDIAN	(1 << 8)
-
-#define PF_FMT_IDX		(0 << 9)		// index mode
-#define PF_FMT_555		(1 << 9)		// 16 bit 555
-#define PF_FMT_565		(2 << 9)		// 16 bit 565
-#define PF_FMT_888		(3 << 9)		// 24 bit 888
-#define PF_MASK_FMT		(3 << 9)
-
-// some helper defines
-#define MODE_APPLE_1			(PF_BITS_1 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_APPLE_2			(PF_BITS_2 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_APPLE_4			(PF_BITS_4 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_APPLE_8			(PF_BITS_8 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_APPLE_16			(PF_BITS_16 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_555)
-#define MODE_APPLE_32			(PF_BITS_32 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_888)
-
-#define MODE_SHIFTER_1			(PF_BITS_1 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_SHIFTER_2			(PF_BITS_2 | PF_PL_ATARI | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_SHIFTER_4			(PF_BITS_4 | PF_PL_ATARI | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_SHIFTER_8			(PF_BITS_8 | PF_PL_ATARI | PF_ENDIAN_BE | PF_FMT_IDX)
-#define MODE_SHIFTER_16			(PF_BITS_16 | PF_PL_ATARI | PF_ENDIAN_BE | PF_FMT_565)
-
-#define MODE_RGB565_BE			(PF_BITS_16 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_565)
-#define MODE_RGB565_LE			(PF_BITS_16 | PF_PL_CHUNKY | PF_ENDIAN_LE | PF_FMT_565)
-#define MODE_RGB555_BE			(PF_BITS_16 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_555)
-#define MODE_RGB555_LE			(PF_BITS_16 | PF_PL_CHUNKY | PF_ENDIAN_LE | PF_FMT_555)
-#define MODE_RGB888_BE			(PF_BITS_32 | PF_PL_CHUNKY | PF_ENDIAN_BE | PF_FMT_888)
-#define MODE_RGB888_LE			(PF_BITS_32 | PF_PL_CHUNKY | PF_ENDIAN_LE | PF_FMT_888)
-
-
-
-
-struct ScreenDesc
-{
-	int16	handle;			// vdi handle
-	uint16	width;			// width of screen in pixels
-	uint16	height;			// height of screen in pixels
-	uint8	bpp;			// bits per pixel
-	uint8	planes;			// number of bitplanes
-	uint16	bytesPerLine;	// number of bytes per line
-	uint16	pf;				// pixel format
-	uint32	addr;			// screen address
-	uint32	vdo;			// vdo cookie
-	uint8	vdiPen[256];	// palette -> pen color map
-};
-
 class MonitorDesc : public monitor_desc
 {
 public:
@@ -233,8 +193,8 @@ public:
 	bool Inited() { return init_ok; }
 
 protected:
-	virtual void UpdatePalette();						// update palette
-	virtual void UpdateScreen();						// update screen
+	virtual void UpdatePalette(uint8* colors, uint16 count);	// update palette
+	virtual void UpdateScreen();								// update screen
 
 	bool init_ok;										// Initialization succeeded
 	ScreenDesc screen;									// Atari screen descriptor
@@ -244,12 +204,17 @@ protected:
 	uint8 macPalette[256*3];							// mac palette
 	uint16 macPaletteDirty;								// number of dirty mac palette entries
 
-	bool shouldUpdateVdiPalette;
-	bool shouldUpdateHardwarePalette;
-	bool shouldUpdateSoftwarePalette;
+	bool shouldUpdateVdiPalette;						// VDI palette
+	bool shouldUpdateHardwarePalette;					// hardware palette
+	bool shouldUpdateSoftwarePalette;					// software palette for color reduction
+	bool shouldDelayPaletteUpdate;						// delay palette update until video interrupt
 
 	bool supportNonPerfectModes;
 	bool supportEmulatedModes;
+
+	// forced video mode
+	uint8 oldShifterRez;
+	uint32 oldMonoHandler;
 
 	// emulation related
 	int16 frameSkip;
@@ -262,13 +227,13 @@ protected:
 	uint32*	pageTable;
 	uint16 pageSize;
 	uint16 pageShift;
-	uint32* hashBuffer;
+	uint32* compareBuffer;
 	uint16 hashSize;
 	bool lowRes;
 	uint8* lowResOffs[480];
-#if ENABLE_VIDEODEBUG
-	int32 videoDebug;
-#endif
+
+	bool ChangeShifterRez(int32 bpp);
+	void RestoreShifterRez();
 
 	void AddModes(uint32 width, uint32 height, video_depth depth);
 	void AddMode(uint32 width, uint32 height, uint32 resolution_id, uint32 bytes_per_row, video_depth depth);
@@ -287,45 +252,72 @@ protected:
 };
 
 
-
 extern int16 aesVersion;
 static vector<video_mode> videoModes;
 static VideoDriver* drv = (VideoDriver*)NULL;
 static MonitorDesc* monitor = (MonitorDesc*)NULL;
-static int16 wndScreen = -1;
+static int16 wndScreen = 0;
 static ScreenDesc vdiScreen;
 static bool vdiScreenValid = false;
-
+#if ENABLE_VIDEODEBUG
+static uint16 videoDebug = 0;
+#endif
 
 // Query Atari display details
 bool QueryScreen(ScreenDesc& scr)
 {
+	log("Queryscreen\n");
 	if (vdiScreenValid)
 	{
 		scr = vdiScreen;
 		return true;
 	}
 
+	int16 dummy;
 	int16 work_in[16];
 	int16 work_out[16+257];
 	memset(work_out, 0, sizeof(work_out));
 	memset(work_in, 0, sizeof(work_in));
 	work_in[0] = 1;				// current device ID. // Getrez() + 2
-	for(uint16 i = 1; i < 10; i++);
+	for(uint16 i = 1; i < 10; i++)
 		work_in[i] = 1;			// default crap
 	work_in[10] = 2;			// raster coordinates
 
 	memset(&scr, 0, sizeof(ScreenDesc));
 
-	// get vdo cookie
+	// get vdo cookie and determine hardware type
 	Getcookie('_VDO', &scr.vdo);
-
-	// get basic info through openvwk
-	int16 vdi_handle = 0;
-	v_opnvwk(work_in, &vdi_handle, work_out);
-	if (vdi_handle == 0)
+	switch (scr.vdo >> 16)
 	{
-		D(bug(" Failed to get VDI handle\n"));
+		case 0:
+			scr.hw = HW_SHIFTER_ST;
+			break;
+		case 1:
+			scr.hw = HW_SHIFTER_STE;
+			break;
+		case 2:
+			scr.hw = HW_SHIFTER_TT;
+			break;
+		case 3:
+			scr.hw = HW_VIDEL;
+			break;
+		default:
+			scr.hw = HW_GFXCARD;
+			break;
+	};
+
+	// get physical workstation handle
+	int16 vdi_handle = graf_handle(&dummy, &dummy, &dummy, &dummy);
+	log (" Physical workstation: %d\n", vdi_handle);
+
+	// open virtual workstation
+	if (vdi_handle > 0)
+		v_opnvwk(work_in, &vdi_handle, work_out);
+
+	log(" Virtual workstation: %d\n", vdi_handle);
+	if (vdi_handle < 1)
+	{
+		D(bug(" Failed opening VDI workstation\n"));
 		return false;
 	}
 
@@ -335,9 +327,9 @@ bool QueryScreen(ScreenDesc& scr)
 
 	// get detailed screen information
 	uint32 cookie;
-	if (Getcookie('EdDI', cookie) == C_FOUND)
+	if (Getcookie('EdDI', &cookie) == C_FOUND)
 	{
-		log(" Query screen (EdDI exists)\n");
+		log(" EdDI: %08x\n", cookie);
 		vq_scrninfo(vdi_handle, work_out);
 
 		scr.bpp = work_out[2];
@@ -370,7 +362,6 @@ bool QueryScreen(ScreenDesc& scr)
 			scr.pf |= PF_PL_CHUNKY;
 
 			uint16 totalbits = work_out[8] + work_out[9] + work_out[10] + work_out[11] + work_out[12] + work_out[13];
-			uint16 colorbits = work_out[8] + work_out[9] + work_out[10];
 			uint16 bitorder = work_out[14];
 
 			if (bitorder & (1 << 7))
@@ -408,7 +399,7 @@ bool QueryScreen(ScreenDesc& scr)
 	else
 	{
 		// there is no EdDI cookie, make shit up as best we can
-		log(" Query screen (no EdDI)\n");
+		log(" No EdDI\n");
 		uint16 clutsize = work_out[13];
 		vq_extnd(vdi_handle, 1, work_out);
 		scr.bpp	= work_out[4];
@@ -466,12 +457,44 @@ bool QueryScreen(ScreenDesc& scr)
 	if (scr.addr == 0)
 		scr.addr = Physbase();
 
-/*
-	// todo: detect Hatari? or file a bug report.
-	// It sets Physbase to 0xfe800000 in Extended VDI mode but its screen is actually at Logbase()
-	if (scr.addr == 0xfe800000)
-		scr.addr = Logbase();
-*/
+	// detect gfxcard based on videomode
+	if (scr.hw < HW_GFXCARD)
+	{
+		switch (scr.bpp)
+		{
+			case 32:
+			case 24:
+				scr.hw = HW_GFXCARD;
+				break;
+			case 16:
+			case 15:
+				if ((scr.hw < HW_VIDEL) || (scr.pf != MODE_SHIFTER_16))
+					scr.hw = HW_GFXCARD;
+				break;
+			case 8:
+				if (scr.hw < HW_SHIFTER_TT)
+					scr.hw = HW_GFXCARD;
+				// intentional fall through
+			case 4:
+			case 2:
+				if ((scr.pf & PF_MASK_PL) != PF_PL_ATARI)
+					scr.hw = HW_GFXCARD;
+				break;
+			case 1:
+			default:
+				break;
+		}
+	}
+
+	// detect gfxcard based on framebuffer location
+	if (scr.hw < HW_GFXCARD)
+	{
+		uint32 physTop = *((volatile uint32*)0x42e);
+		if (scr.addr >= physTop)
+			scr.hw = HW_GFXCARD;
+	}
+
+	// finalize
 	scr.handle = vdi_handle;
 	vdiScreen = scr;
 	vdiScreenValid = true;
@@ -538,12 +561,12 @@ bool AtariScreenInfo(int32 mode, bool& native, uint32& mem)
 	return (native || emu);
 }
 
-
 //-------------------------------------------------------------
 //
 // Basilisk interface
 //
 //-------------------------------------------------------------
+
 bool VideoInit(bool classic)
 {
 	log("VideoInit\n");
@@ -553,62 +576,7 @@ bool VideoInit(bool classic)
 		ErrorAlert("Screen query failed");
 		return false;
 	}
-/*
-	// todo: switch video mode
-
-	int32 mode = PrefsFindInt32("video_mode");
-	if (mode != 0)
-	{
-		uint16 sr = DisableInterrupts();
-		uint16 zp = SetZeroPage(ZEROPAGE_OLD);
-		SetSR(0x2100);
-		bool tt = (screen.vdo >> 16) == 2;
-		bool falc = (screen.vdo >> 16) == 3;
-		Vsync();
-		if (tt)
-		{
-			switch(mode)
-			{
-				case 4:
-					EsetShift(4 << 8);	// tt-medium
-					break;
-				case 8:
-					EsetShift(7 << 7);	// tt-low
-					break;
-				default:
-					EsetShift(2 << 8);	// st-high
-					break;
-			}
-		}
-		else if (falc)
-		{
-			//uint32 om = VsetMode(-1);
-			//uint32 a = -1;
-			//uint32 nm = om;
-			//VSetscreen(a, a, nm);
-		}
-		else
-		{
-			switch (mode)
-			{
-				case 4:
-					Setscreen(-1, -1, 0);	// st-low
-					break;
-				default:
-					Setscreen(-1, -1, 2);	// st-high
-					break;
-			}
-		}
-		Vsync();
-		Vsync();
-		vdiScreenValid = false;
-		QueryScreen(screen);
-		DisableInterrupts();
-		SetZeroPage(zp);
-		SetSR(sr);
-	}
-	*/
-
+	
 	log(" VDI: %dx%dx%d (%s)\n", screen.width, screen.height, screen.bpp, screen.bpp == 1 ? "mono" : screen.planes > 1 ? "planar" : "chunky");
 	log("      %d planes, %d bytes per line\n", screen.planes, screen.bytesPerLine);
 	log(" VDO: %08x\n", screen.vdo);
@@ -616,10 +584,20 @@ bool VideoInit(bool classic)
 	log(" ScreenPtr: %08x\n", screen.addr);
 	log(" Logbase:   %08x\n", Logbase());
 	log(" Physbase:  %08x\n", Physbase());
+	log(" Hardware:  %s\n", videoHwStrings[screen.hw]);
 
+#if ENABLE_VIDEODEBUG
+	videoDebug = PrefsFindInt32("video_debug");
+	log(" VideoDbg:  %d\n", videoDebug);
+#endif
 
 	// create video driver
 	drv = new VideoDriver();
+	if (!drv)
+	{
+		log(" Err: Failed to create video driver\n");
+		return false;
+	}
 	monitor = drv->Init(screen);
 	if (!monitor)
 	{
@@ -637,7 +615,9 @@ bool VideoInit(bool classic)
 
 	// assign monitor and setup driver
 	VideoMonitors.push_back(monitor);
+	log(" Driver setup\n");
 	drv->Setup();
+	log(" VideoInit done\n");
 	return true;
 }
 
@@ -650,11 +630,10 @@ void VideoExit(void)
 		delete drv;
 		drv = NULL;
 	}
-
 	if (wndScreen)
 	{
 		wind_close(wndScreen);
-		wndScreen = -1;
+		wndScreen = 0;
 	}
 }
 
@@ -667,10 +646,26 @@ void VideoInterrupt(void)
 {
 }
 
+static volatile bool screenInitedFromMac = false;
 
 void AtariScreenUpdate()
 {
-	static bool busy = false;
+#if ENABLE_VIDEODEBUG
+	if (videoDebug & DBGFLAG_NO_UPDATE)
+		return;
+
+	if (videoDebug & DBGFLAG_NO_EARLY_UPDATE)
+	{
+		if (!screenInitedFromMac)
+		{
+			if (GetZeroPage() == ZEROPAGE_MAC)
+				screenInitedFromMac = HasMacStarted();
+			return;
+		}
+	}
+#endif
+
+	static volatile bool busy = false;
 	if (!busy)
 	{
 		busy = true;
@@ -704,7 +699,9 @@ int16 MonitorDesc::driver_control(uint16 code, uint32 param, uint32 dce)
 	{
 		if (code == cscGrayPage)
 		{
+			D(bug("graypage\n"));
 			drv->GrayPage();
+			D(bug("graypage done\n"));
 		}
 	}
 	SetSR(sr);
@@ -713,10 +710,12 @@ int16 MonitorDesc::driver_control(uint16 code, uint32 param, uint32 dce)
 
 void MonitorDesc::set_palette(uint8 *pal, int num)
 {
+	D(bug("set_palette %d\n", num))
 	uint16 sr = DisableInterrupts();
 	if (drv && drv->Inited())
 		drv->SetPalette(pal, num);
 	SetSR(sr);
+	D(bug(" set_palette done\n"))
 }
 
 void MonitorDesc::set_gamma(uint8 *gamma, int num)
@@ -725,14 +724,14 @@ void MonitorDesc::set_gamma(uint8 *gamma, int num)
 
 void MonitorDesc::switch_to_current_mode()
 {
+	D(bug("set_mode %d, %d\n", get_current_mode().x, get_current_mode().y));
 	if (drv && drv->Inited())
 	{
-		D(bug("init input %d, %d\n", get_current_mode().x, get_current_mode().y));
 		uint16 sr = DisableInterrupts();
 		drv->Setup();
 		SetSR(sr);
-		D(bug("init input %d, %d\n", get_current_mode().x, get_current_mode().y));
 	}
+	D(bug(" set_mode done\n"));
 }
 
 
@@ -745,12 +744,15 @@ void MonitorDesc::switch_to_current_mode()
 
 VideoDriver::VideoDriver()
 	: init_ok(false)
-	, macPaletteDirty(false)
-	, shouldUpdateVdiPalette(true)
+	, macPaletteDirty(0)
+	, shouldUpdateVdiPalette(false)
 	, shouldUpdateHardwarePalette(true)
 	, shouldUpdateSoftwarePalette(true)
+	, shouldDelayPaletteUpdate(true)
 	, supportNonPerfectModes(true)
 	, supportEmulatedModes(true)
+	, oldShifterRez(0xFF)
+	, oldMonoHandler(0)
 	, frameSkip(0)
 	, fullRedraw(true)
 	, emulatedScreen(NULL)
@@ -760,12 +762,9 @@ VideoDriver::VideoDriver()
 	, pageTable(NULL)
 	, pageSize(0)
 	, pageShift(0)
-	, hashBuffer(NULL)
+	, compareBuffer(NULL)
 	, hashSize(0)
 	, lowRes(false)
-#if ENABLE_VIDEODEBUG
-	, videoDebug(0)
-#endif	
 {
 	supportEmulatedModes = PrefsFindBool("video_emu");
 }
@@ -782,14 +781,45 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 
 	screen = scr;
 
+	// change mode
+	int32 forceMode = PrefsFindInt32("video_mode");
+	if (forceMode > 0)
+	{
+		// todo: falcon
+		switch (screen.hw)
+		{
+			case HW_SHIFTER_ST:
+			case HW_SHIFTER_STE:
+			case HW_SHIFTER_TT:
+				ChangeShifterRez(forceMode);
+				break;
+			case HW_VIDEL:
+				break;
+		}
+	}
+
+	if (scr.hw >= HW_GFXCARD)
+	{
+		shouldUpdateVdiPalette = true;
+		shouldUpdateHardwarePalette = false;
+		shouldUpdateSoftwarePalette = false;
+		shouldDelayPaletteUpdate = false;
+	}
+
+#if ENABLE_VIDEODEBUG
+	if (videoDebug & DBGFLAG_NO_VDIPAL)
+		shouldUpdateVdiPalette = false;
+	if (videoDebug & DBGFLAG_NO_HWPAL)
+		shouldUpdateHardwarePalette = false;
+#endif
+
 	if (screen.bpp <= 8)
 	{
 		uint16 count = (1 << screen.bpp);
-		log (" Backing up vdi palette\n");
-
 		if (shouldUpdateVdiPalette)
 		{
 			// backup existing vdi palette
+			log (" Backing up vdi palette\n");
 			memset(tosVdiPal, 0, 512*3);
 			for (int16 i=0; i<count; i++) {
 				vq_color(screen.handle, i, 1, &tosVdiPal[i*3]);
@@ -800,33 +830,25 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		if (shouldUpdateHardwarePalette)
 		{
 			log (" Backing up hw palette\n");
-			switch (screen.vdo >> 16)
+			switch (screen.hw)
 			{
-				case 0:
-				case 1:
+				case HW_SHIFTER_ST:
+				case HW_SHIFTER_STE:
 				{
 					volatile uint16* p = (volatile uint16*)0xFF8240;
 					for (uint16 i=0; (i<count) && (i < 16); i++)
 						tosHwPal[i] = p[i];
 				}
 				break;
-				case 2:
+				case HW_SHIFTER_TT:
 				{
 					volatile uint16* p = (volatile uint16*)0xFF8400;
 					for (uint16 i=0; (i<count) && (i < 256); i++)
 						tosHwPal[i] = p[i];
 				}
 				break;
-				case 3:
+				case HW_VIDEL:
 				{
-					#if FALCON_CONSIDER_STPAL
-					if (screen.bpp == 4)
-					{
-						volatile uint16* pst = (volatile uint16*)0xFF8240;
-						for (uint16 i=0; (i<count) && (i < 16); i++)
-							tosHwPal[i+16] = pst[i];
-					}
-					#endif
 					volatile uint32* p = (volatile uint32*)0xFF9800;
 					for (uint16 i=0; (i<count) && (i < 256); i++)
 						tosHwPal[i] = p[i];
@@ -896,7 +918,7 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 
 				// additional 8-on-16bit mode for Falcon
 				#if SUPPORT_8ON16BIT
-				if ((screen.pf == MODE_RGB565_BE) && ((screen.vdo >> 16) == 3))
+				if ((screen.pf == MODE_SHIFTER_16) && (scr.hw == HW_VIDEL))
 					AddModes(screen.width, screen.height, VDEPTH_8BIT);
 				#endif
 			}
@@ -937,8 +959,8 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		const uint32 alignMask = (alignSize - 1);
 
 		const uint32 screenBufSize = ((((largestMode.y * largestMode.bytes_per_row) + alignMask) & ~alignMask) + (alignSize << 1));
-		const uint32 hashBufSize = (screenBufSize / 32) << 2;
-		const uint32 totalSize = alignSize + screenBufSize + alignSize + hashBufSize + alignSize;
+		const uint32 compareBufferSize = (screenBufSize / 32) << 2;
+		const uint32 totalSize = alignSize + screenBufSize + alignSize + compareBufferSize + alignSize;
 
 		log(" Allocating %d kb for emulation buffers\n", totalSize / 1024);
 
@@ -951,10 +973,10 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 
 		memset((void*)memptr, 0, totalSize);
 		emulatedScreen = (uint8*) ((memptr + alignMask) & ~alignMask);
-		hashBuffer = (uint32*) (emulatedScreen + screenBufSize + alignSize);
+		compareBuffer = (uint32*) (emulatedScreen + screenBufSize + alignSize);
 
 		log(" emulatedScreen: %08x (%d, %d, %d)\n", emulatedScreen, largestMode.x, largestMode.y, largestMode.depth);
-		log(" compareBuffer:  %08x\n", hashBuffer);
+		log(" compareBuffer:  %08x\n", compareBuffer);
 
 		uint16 sr = DisableInterrupts();
 		EnterSection(SECTION_DEBUG);
@@ -1003,18 +1025,18 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				FlushCache030();
 			}
 		}
-		if (PrefsFindBool("video_cmp") == false)
+
+		// ignore compare buffer when in slow ram
+		if (/*(compareBuffer < 0x01000000) ||*/ (PrefsFindBool("video_cmp") == false))
+		{
+			compareBuffer = NULL;
 			hashSize = 0;
+		}
 
 		ExitSection(SECTION_DEBUG);
 		SetSR(sr);
 		log(" pageTable:      %08x (%d %d %d)\n", pageTable, pageSize, pageShift, hashSize);
 	}
-
-#if ENABLE_VIDEODEBUG
-	videoDebug = PrefsFindInt32("video_debug");
-	log(" video_debug: %d\n", videoDebug);
-#endif
 
 	init_ok = true;
 	MonitorDesc* m = new MonitorDesc(videoModes, videoModes[0].depth, videoModes[0].resolution_id);
@@ -1043,33 +1065,25 @@ void VideoDriver::Release()
 		// restore original hw palette
 		if (shouldUpdateHardwarePalette)
 		{
-			switch (screen.vdo >> 16)
+			switch (screen.hw)
 			{
-				case 0:
-				case 1:
+				case HW_SHIFTER_ST:
+				case HW_SHIFTER_STE:
 				{
 					volatile uint16* p = (volatile uint16*)0xFF8240;
 					for (uint16 i=0; (i < count) && (i < 16); i++)
 						p[i] = tosHwPal[i];
 				}
 				break;
-				case 2:
+				case HW_SHIFTER_TT:
 				{
 					volatile uint16* p = (volatile uint16*)0xFF8400;
 					for (uint16 i=0; (i < count) && (i < 256); i++)
 						p[i] = tosHwPal[i];
 				}
 				break;
-				case 3:
+				case HW_VIDEL:
 				{
-					#if FALCON_CONSIDER_STPAL
-					if (screen.bpp == 4)
-					{
-						volatile uint16* pst = (volatile uint16*)0xFF8240;
-						for (uint16 i=0; (i < count) && (i < 16); i++)
-							pst[i] = tosHwPal[i + 16];
-					}
-					#endif
 					volatile uint32* p = (volatile uint32*)0xFF9800;
 					for (uint16 i=0; (i < count) && (i < 256); i++)
 						p[i] = tosHwPal[i];
@@ -1078,6 +1092,10 @@ void VideoDriver::Release()
 			}
 		}
 	}
+
+	// restore shifter if we have changed it
+	if (oldShifterRez != 0xFF)
+		RestoreShifterRez();
 
 	// todo: free memory
 	init_ok = false;
@@ -1099,11 +1117,17 @@ bool VideoDriver::Setup()
 	{
 		switch (mode.depth)
 		{
+			default:
+				break;
+
 			case VDEPTH_4BIT:
 			{
 				if (screen.pf != MODE_APPLE_4)
 				{
-					blitFunc = c2p1x1_4_from_4;
+					if (HostCPUType >= 6)
+						blitFunc = c2p1x1_4_from_4_060;
+					else
+						blitFunc = c2p1x1_4_from_4;
 				}
 			}
 			break;
@@ -1116,14 +1140,18 @@ bool VideoDriver::Setup()
 					{
 						case 4:
 						{
-							blitFunc = lowRes ? c2p1x1_4_from_8_halfx : c2p1x1_4_from_8;
+							if (HostCPUType >= 6)
+								blitFunc = lowRes ? c2p1x1_4_from_8_060_halfx : c2p1x1_4_from_8_060;
+							else
+								blitFunc = lowRes ? c2p1x1_4_from_8_halfx : c2p1x1_4_from_8;
+
 							macPaletteDirty = 256;
 						}
 						break;
 						case 8:
 						{
 							if (HostCPUType >= 6)
-								blitFunc = lowRes ? c2p1x1_8_from_8_halfx_060 : c2p1x1_8_from_8;
+								blitFunc = lowRes ? c2p1x1_8_from_8_060_halfx : c2p1x1_8_from_8_060;
 							else
 								blitFunc = lowRes ? c2p1x1_8_from_8_halfx : c2p1x1_8_from_8;
 						}
@@ -1238,33 +1266,50 @@ bool VideoDriver::Setup()
 		}
 	}
 
-
 	SetZeroPage(zp);
 	monitor->set_mac_frame_base((uint32)macFrameBase);
 
 	// todo: show logo?
-	uint8 clearColor = (screen.bpp > 8) ? 0xFF : 0x00;
-	memset((void*)screen.addr, clearColor, screen.bytesPerLine * screen.height);
+#if ENABLE_VIDEODEBUG
+	if ((videoDebug & DBGFLAG_NO_CLEAR) == 0)
+#endif
+	{
+		uint8 clearColor = (screen.bpp > 8) ? 0xFF : 0x00;
+		memset((void*)screen.addr, clearColor, screen.bytesPerLine * screen.height);
+	}
 
 	SetSR(sr);
 
 	const uint16 msx = (mode.x << 8) / screen.width;
 	const uint16 msy = (mode.y << 8) / screen.height;
-	InitInput(mode.x, mode.y, msx, msy);
+#if ENABLE_VIDEODEBUG
+	if ((videoDebug & DBGFLAG_NO_INPUT) == 0)
+#endif
+	{
+		InitInput(mode.x, mode.y, msx, msy);
+	}
+
 	return true;
 }
 
 void VideoDriver::GrayPage()
 {
+#if ENABLE_VIDEODEBUG
+	if (videoDebug & DBGFLAG_NO_CLEAR)
+		return;
+#endif
+	D(bug("graypage start\n"));
 	uint8 c = (screen.bpp > 8) ? 0x00 : 0xFF;
 	memset((void*)screen.addr, c, screen.bytesPerLine * screen.height);
 	if (emulatedScreen && monitor)
 	{
+		D(bug(" graypage emuscreen\n"));
 		const video_mode& mode = monitor->get_current_mode();
 		c = (mode.depth > VDEPTH_8BIT) ? 0x00 : 0xFF;
 		memset(emulatedScreen, 0, mode.y * mode.bytes_per_row);
 		fullRedraw = true;
 	}
+	D(bug(" graypage done\n"));
 }
 
 void VideoDriver::SetPalette(uint8 *pal, int num)
@@ -1274,10 +1319,16 @@ void VideoDriver::SetPalette(uint8 *pal, int num)
 		if (num > 256)
 			num = 256;
 
-		memcpy(macPalette, pal, num+(num<<1));
-
-		if (macPaletteDirty < num)
-			macPaletteDirty = num;
+		if (shouldDelayPaletteUpdate)
+		{
+			memcpy(macPalette, pal, num+(num<<1));
+			if (macPaletteDirty < num)
+				macPaletteDirty = num;
+		}
+		else
+		{
+			UpdatePalette(pal, num);
+		}
 	}
 }
 
@@ -1292,9 +1343,9 @@ void VideoDriver::Update()
 		frameSkipper = 0;
 	}
 
-	if (macPaletteDirty)
+	if (macPaletteDirty && shouldDelayPaletteUpdate)
 	{
-		UpdatePalette();
+		UpdatePalette(macPalette, macPaletteDirty);
 		macPaletteDirty = 0;
 		if (fullRedraw)
 			frameSkipper = -2;
@@ -1309,9 +1360,7 @@ void VideoDriver::UpdateScreen()
 		return;
 
 #if ENABLE_VIDEODEBUG
-	if (videoDebug & 1)
-		hashSize = 0;
-	if (videoDebug & 2)
+	if (videoDebug & DBGFLAG_FORCE_REDRAW)
 		fullRedraw = true;
 #endif
 
@@ -1324,6 +1373,7 @@ void VideoDriver::UpdateScreen()
 	uint16 srcBits;
 	switch (mode.depth)
 	{
+		default:
 		case VDEPTH_1BIT: srcBits = 1; break;
 		case VDEPTH_2BIT: srcBits = 2; break;
 		case VDEPTH_4BIT: srcBits = 4; break;
@@ -1334,6 +1384,17 @@ void VideoDriver::UpdateScreen()
 
 	const uint32 mmuModifiedFlag = (1 << 4);	// same bit on 030/040/060
 	const uint16 pageCount = macScreenSize >> pageShift;
+	const uint16 minNumDstPixelsPerC2P = 16;
+	const uint16 remainBytes = (macScreenSize - (pageCount << pageShift)) & ~(minNumDstPixelsPerC2P-1);
+
+	if (pageTable && !fullRedraw)
+	{
+		FlushATC();
+	#if ENABLE_VIDEODEBUG
+		if (videoDebug & DBGFLAG_CACHE_FLUSH1)
+			FlushCache();
+	#endif
+	}
 
 	if (lowRes)
 	{
@@ -1368,207 +1429,221 @@ void VideoDriver::UpdateScreen()
 					blitFunc(dst, src, mode.bytes_per_row, softPalette);
 			#if DEBUG_MMU
 				else
-					memset(d, 0x00, dstInc);
+					memset(dst, 0x00, dstInc);
 			#endif
 				dst += dstInc;
 			}
 
-			for (uint16 i=0; i<pageCount+1; i++)
+			// clear modified bits
+			uint16 count = remainBytes ? pageCount + 1 : pageCount;
+			for (uint16 i=0; i<count; i++)
 				pageTable[i] &= ~mmuModifiedFlag;
-
-			FlushATC();
-		}
-		return;
-	}
-
-
-	if (fullRedraw)
-	{
-		// full redraw
-		fullRedraw = false;
-		blitFunc(dst, src, macScreenSize, softPalette);
-	}
-	else if ((pageTable == NULL) || (pageSize == 0))
-	{
-		// no mmu acceleration
-		if ((hashBuffer == NULL) || (hashSize < 32))
-		{
-			// no compare acceleration
-			blitFunc(dst, src, macScreenSize, softPalette);
-		}
-		else
-		{
-			// compare acceleration
-			uint32 hashCount = macScreenSize / hashSize;
-			uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-			uint32* cmpDst = hashBuffer;
-			uint16 chunkCount = hashSize >> 5;
-			while (hashCount)
-			{
-				uint32* cmpSrc = (uint32*)src;
-				uint32 oldHash = *cmpDst;
-				uint32 hash = (uint32)cmpSrc;
-				uint16 chunks = chunkCount;
-				while (chunks)
-				{
-					hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-					hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-					chunks--;
-				}
-				if (hash != oldHash)
-					blitFunc(dst, src, hashSize, softPalette);
-			#if DEBUG_MMU
-				else
-					memset(dst, 0xFF, hashSizeDst);
-			#endif
-				src += hashSize;
-				dst += hashSizeDst;
-				*cmpDst++ = hash;
-				hashCount--;
-			}
 		}
 	}
 	else
 	{
-		// mmu acceleration
-		uint32* page = pageTable;
-		const uint16 minNumDstPixelsPerC2P = 16;
-		const uint16 remainBytes = (macScreenSize - (pageCount * pageSize)) & ~(minNumDstPixelsPerC2P-1);
-		const uint32* lastPage = pageTable + pageCount;
-		const uint32 pageSizeDst = ((uint32(pageSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-
-		if ((hashSize == 0) || (hashBuffer == NULL))
+		if (fullRedraw)
 		{
-			// no compare acceleration
-			while (page < lastPage)
+			// full redraw
+			fullRedraw = false;
+			blitFunc(dst, src, macScreenSize, softPalette);
+		}
+		else if ((pageTable == NULL) || (pageSize == 0))
+		{
+			// no mmu acceleration
+			if ((compareBuffer == NULL) || (hashSize < 32))
+			{
+				// no compare acceleration
+				blitFunc(dst, src, macScreenSize, softPalette);
+			}
+			else
+			{
+				// compare acceleration
+				uint32 hashCount = macScreenSize / hashSize;
+				uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
+				uint32* cmpDst = compareBuffer;
+				uint16 chunkCount = hashSize >> 5;
+				while (hashCount)
+				{
+					uint32* cmpSrc = (uint32*)src;
+					uint32 oldHash = *cmpDst;
+					uint32 hash = (uint32)cmpSrc;
+					uint16 chunks = chunkCount;
+					while (chunks)
+					{
+						hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
+						hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
+						chunks--;
+					}
+					if (hash != oldHash)
+						blitFunc(dst, src, hashSize, softPalette);
+				#if DEBUG_MMU
+					else
+						memset(dst, 0xFF, hashSizeDst);
+				#endif
+					src += hashSize;
+					dst += hashSizeDst;
+					*cmpDst++ = hash;
+					hashCount--;
+				}
+			}
+		}
+		else
+		{
+			// mmu acceleration
+			uint32* page = pageTable;
+			const uint32* lastPage = pageTable + pageCount;
+			const uint32 pageSizeDst = ((uint32(pageSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
+
+			if ((hashSize == 0) || (compareBuffer == NULL))
+			{
+				// no compare acceleration
+				while (page < lastPage)
+				{
+					uint32 desc = *page;
+					if (desc & mmuModifiedFlag)
+					{
+						*page = (desc & ~mmuModifiedFlag);
+						blitFunc(dst, src, pageSize, softPalette);
+					}
+				#if DEBUG_MMU
+					else
+						memset(dst, 0, pageSizeDst);
+				#endif
+					src += pageSize;
+					dst += pageSizeDst;
+					page++;
+				}
+			}
+			else
+			{
+				// compare acceleration
+				const uint16 hashCount = pageSize / hashSize;
+				uint32* cmpDst = compareBuffer;
+				uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
+
+				while (page < lastPage)
+				{
+					uint32 desc = *page;
+					if ((desc & mmuModifiedFlag) == 0)
+					{
+					#if DEBUG_MMU
+						memset(dst, 0x00, pageSizeDst);
+					#endif
+						src += pageSize;
+						dst += pageSizeDst;
+						cmpDst += hashCount;
+					}
+					else
+					{
+						*page = (desc & ~mmuModifiedFlag);
+						uint16 count = hashCount;
+						while (count)
+						{
+							uint32* cmpSrc = (uint32*)src;
+							uint32 oldHash = *cmpDst;
+							uint32 hash = (uint32)cmpSrc;
+							uint16 dohash = (hashSize >> 5);
+							while (dohash)
+							{
+								hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
+								hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
+								dohash--;
+							}
+							if (hash != oldHash)
+								blitFunc(dst, src, hashSize, softPalette);
+						#if DEBUG_MMU
+							else
+								memset(dst, 0xFF, hashSizeDst);
+						#endif
+							src += hashSize;
+							dst += hashSizeDst;
+							*cmpDst++ = hash;
+							count--;
+						}
+					}
+					page++;
+				}
+			}
+
+			// remaining bytes
+			if (remainBytes)
 			{
 				uint32 desc = *page;
 				if (desc & mmuModifiedFlag)
 				{
 					*page = (desc & ~mmuModifiedFlag);
-					blitFunc(dst, src, pageSize, softPalette);
+					blitFunc(dst, src, remainBytes, softPalette);
 				}
-			#if DEBUG_MMU
-				else
-					memset(dst, 0, pageSizeDst);
-			#endif
-				src += pageSize;
-				dst += pageSizeDst;
-				page++;
 			}
 		}
-		else
-		{
-			// compare acceleration
-			const uint16 hashCount = pageSize / hashSize;
-			uint32* cmpDst = hashBuffer;
-			uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-
-			while (page < lastPage)
-			{
-				uint32 desc = *page;
-				if ((desc & mmuModifiedFlag) == 0)
-				{
-				#if DEBUG_MMU
-					memset(dst, 0x00, pageSizeDst);
-				#endif
-					src += pageSize;
-					dst += pageSizeDst;
-					cmpDst += hashCount;
-				}
-				else
-				{
-					*page = (desc & ~mmuModifiedFlag);
-					uint16 count = hashCount;
-					while (count)
-					{
-						uint32* cmpSrc = (uint32*)src;
-						uint32 oldHash = *cmpDst;
-						uint32 hash = (uint32)cmpSrc;
-						uint16 dohash = (hashSize >> 5);
-						while (dohash)
-						{
-							hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-							hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-							dohash--;
-						}
-						if (hash != oldHash)
-							blitFunc(dst, src, hashSize, softPalette);
-					#if DEBUG_MMU
-						else
-							memset(dst, 0xFF, hashSizeDst);
-					#endif
-						src += hashSize;
-						dst += hashSizeDst;
-						*cmpDst++ = hash;
-						count--;
-					}
-				}
-				page++;
-			}
-		}
-		if (remainBytes && (*page & mmuModifiedFlag))
-		{
-			*page &= ~mmuModifiedFlag;
-			blitFunc(dst, src, remainBytes, softPalette);
-		}
-
-		FlushATC();
 	}
+
+	if (pageTable && !fullRedraw)
+	{
+		FlushATC();
+#if ENABLE_VIDEODEBUG
+		if (videoDebug & DBGFLAG_CACHE_FLUSH2)
+			FlushCache();
+#endif
+	}
+
 }
 
 
-void VideoDriver::UpdatePalette()
+#define MAKE_PC_COLOR(_r,_g,_b) _r,_g,_b
+static const uint8 hard8to4Palette_color[] = 
 {
-	uint8* colors = macPalette;
-	uint16 numcolors = macPaletteDirty;
+	MAKE_PC_COLOR(0,0,0),
+	MAKE_PC_COLOR(68,36,52),
+	MAKE_PC_COLOR(48,52,109),
+	MAKE_PC_COLOR(78,74,78),
+	MAKE_PC_COLOR(133,76,48),
+	MAKE_PC_COLOR(52,101,36),
+	MAKE_PC_COLOR(208,70,72),
+	MAKE_PC_COLOR(117,113,97),
+	MAKE_PC_COLOR(89,125,206),
+	MAKE_PC_COLOR(210,125,44),
+	MAKE_PC_COLOR(133,149,161),
+	MAKE_PC_COLOR(109,170,44),
+	MAKE_PC_COLOR(210,170,153),
+	MAKE_PC_COLOR(109,194,202),
+	MAKE_PC_COLOR(218,212,94),
+	MAKE_PC_COLOR(255,255,255)
+};
+static const uint8 hard8to4Palette_gray[] = 
+{
+	MAKE_PC_COLOR(0,0,0),
+	MAKE_PC_COLOR(16,16,16),
+	MAKE_PC_COLOR(32,32,32),
+	MAKE_PC_COLOR(48,48,48),
+	MAKE_PC_COLOR(64,64,64),
+	MAKE_PC_COLOR(96,96,96),
+	MAKE_PC_COLOR(128,128,128),
+	MAKE_PC_COLOR(144,144,144),
+	MAKE_PC_COLOR(160,160,160),
+	MAKE_PC_COLOR(176,176,176),
+	MAKE_PC_COLOR(192,192,192),
+	MAKE_PC_COLOR(208,208,208),
+	MAKE_PC_COLOR(224,224,224),
+	MAKE_PC_COLOR(240,240,240),
+	MAKE_PC_COLOR(255,255,255),
+	MAKE_PC_COLOR(255,255,255)
+};
+
+
+void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
+{
+	D(bug("update palette\n"));
+	bool updateHwPal = shouldUpdateHardwarePalette;
+	bool updateSwPal = shouldUpdateSoftwarePalette;
+	bool updateVdiPal = shouldUpdateVdiPalette;
 
 	if (screen.bpp <= 8)
 	{
 		// 8 -> 4 bit mapping
 		if ((screen.bpp == 4) && (monitor->get_current_mode().depth == VDEPTH_8BIT))
 		{
-			#define MAKE_PC_COLOR(_r,_g,_b) _r,_g,_b
-			const uint8 hard8to4Palette_color[] = 
-			{
-				MAKE_PC_COLOR(0,0,0),
-				MAKE_PC_COLOR(68,36,52),
-				MAKE_PC_COLOR(48,52,109),
-				MAKE_PC_COLOR(78,74,78),
-				MAKE_PC_COLOR(133,76,48),
-				MAKE_PC_COLOR(52,101,36),
-				MAKE_PC_COLOR(208,70,72),
-				MAKE_PC_COLOR(117,113,97),
-				MAKE_PC_COLOR(89,125,206),
-				MAKE_PC_COLOR(210,125,44),
-				MAKE_PC_COLOR(133,149,161),
-				MAKE_PC_COLOR(109,170,44),
-				MAKE_PC_COLOR(210,170,153),
-				MAKE_PC_COLOR(109,194,202),
-				MAKE_PC_COLOR(218,212,94),
-				MAKE_PC_COLOR(255,255,255)
-			};
-
-			const uint8 hard8to4Palette_gray[] = 
-			{
-				MAKE_PC_COLOR(0,0,0),
-				MAKE_PC_COLOR(16,16,16),
-				MAKE_PC_COLOR(32,32,32),
-				MAKE_PC_COLOR(48,48,48),
-				MAKE_PC_COLOR(64,64,64),
-				MAKE_PC_COLOR(96,96,96),
-				MAKE_PC_COLOR(128,128,128),
-				MAKE_PC_COLOR(144,144,144),
-				MAKE_PC_COLOR(160,160,160),
-				MAKE_PC_COLOR(176,176,176),
-				MAKE_PC_COLOR(192,192,192),
-				MAKE_PC_COLOR(208,208,208),
-				MAKE_PC_COLOR(224,224,224),
-				MAKE_PC_COLOR(240,240,240),
-				MAKE_PC_COLOR(255,255,255),
-				MAKE_PC_COLOR(255,255,255)
-			};
-
 			uint8* spal = colors;
 			uint8* hardPalette = hard8to4Palette_gray;
 			for(uint16 i=0; (i<numcolors) && (hardPalette == hard8to4Palette_gray); i++)
@@ -1582,15 +1657,15 @@ void VideoDriver::UpdatePalette()
 			uint16 diff = 0;
 			for (uint16 i=0; i<numcolors; i++)
 			{
-				int r = *spal++ >> 2;
-				int g = *spal++ >> 2;
-				int b = *spal++ >> 2;
+				uint32 r = *spal++ >> 2;
+				uint32 g = *spal++ >> 2;
+				uint32 b = *spal++ >> 2;
 				uint8* dpal = (uint8*)hardPalette;
 				uint8 bestitem = 0;
 				uint32 bestsum = 0xFFFFFFFF;
 				for (uint16 j=0; j<16; j++)
 				{
-					int c1,c2,sum;
+					uint32 c1,c2,sum;
 					c1 = *dpal++ >> 2;	// red
 					c2 = (c1 > r) ? c1 - r : r - c1;
 					c2 = c2 * c2;
@@ -1615,48 +1690,49 @@ void VideoDriver::UpdatePalette()
 					diff++;
 				}
 			}
-			if (diff == 0)
-				return;
+
 			colors = (uint8*)hardPalette;
 			numcolors = 16;
 			fullRedraw = true;
-			shouldUpdateVdiPalette = false;
-			shouldUpdateHardwarePalette = true;
-			shouldUpdateSoftwarePalette = false;
+			updateSwPal = false;
 		}
 
 		// update vdi palette
-		if (shouldUpdateVdiPalette)
+		if (updateVdiPal)
 		{
-			TOS_CONTEXT();
 			uint8* pal = colors;
-			for (uint16 i=0; i<numcolors; i++)
+			const uint16 max = (1 << screen.bpp);
+			const uint16 count = numcolors > max ? max : numcolors;
+			D(bug(" vdi palette %d (%d)\n", numcolors, count));
 			{
-				uint16 c;
-				uint16 rgb[3];
-				c = *pal++; rgb[0] = ScaleColorValueForVdi(c);
-				c = *pal++; rgb[1] = ScaleColorValueForVdi(c);
-				c = *pal++;	rgb[2] = ScaleColorValueForVdi(c);
-				uint8 pen = screen.vdiPen[i];
-				vs_color(screen.handle, pen, (const short*) rgb);
+				TOS_CONTEXT_NOIRQ();
+				for (uint16 i=0; i<count; i++)
+				{
+					uint16 c;
+					uint16 rgb[3];
+					c = (uint16) *pal++; rgb[0] = ScaleColorValueForVdi(c);
+					c = (uint16) *pal++; rgb[1] = ScaleColorValueForVdi(c);
+					c = (uint16) *pal++; rgb[2] = ScaleColorValueForVdi(c);
+					uint8 pen = screen.vdiPen[i];
+					vs_color(screen.handle, (short) pen, (const short*) rgb);
+				}
 			}
 		}
 
 		// update hardware palette
-		if (shouldUpdateHardwarePalette)
+		if (updateHwPal)
 		{
-			uint16 max = (1 << screen.bpp);
-			if (numcolors > max)
-				numcolors = max;
-
-			switch (screen.vdo >> 16)
+			const uint16 max = (1 << screen.bpp);
+			const uint16 count = numcolors > max ? max : numcolors;
+			D(bug(" hw palette %d\n", count));
+			switch (screen.hw)
 			{
-				case 0:		// ST shifter
-				case 1:		// STE shifter
+				case HW_SHIFTER_ST:
+				case HW_SHIFTER_STE:
 				{
 					uint8* src = colors;
 					volatile uint16* dst = (volatile uint16*)0xFF8240;
-					for (uint16 i=0; (i<numcolors) && (i < 16); i++)
+					for (uint16 i=0; (i<count) && (i < 16); i++)
 					{
 						uint16 r = *src++; uint16 g = *src++; uint16 b = *src++;
 						uint16 rgb =((r & 0xE0) << 3) | ((r & 0x10) << 7) |
@@ -1667,12 +1743,12 @@ void VideoDriver::UpdatePalette()
 				}
 				break;
 
-				case 2:		// TT shifter
+				case HW_SHIFTER_TT:
 				{
 					*((volatile uint16*)0xFF8262) &= ~0x7;
 					uint8* src = colors;
 					volatile uint16* dst = (volatile uint16*)0xFF8400;
-					for (uint16 i=0; (i<numcolors) && (i < 256); i++)
+					for (uint16 i=0; (i<count) && (i < 256); i++)
 					{
 						uint16 r = *src++ & 0xF0;
 						uint16 g = *src++ & 0xF0;
@@ -1683,47 +1759,26 @@ void VideoDriver::UpdatePalette()
 				}
 				break;
 
-				case 3:		// Falcon Videl
+				case HW_VIDEL:
 				{
-	 				#if FALCON_CONSIDER_STPAL
-					if (screen.bpp == 4)
+					uint8* src = colors;
+					volatile uint32* dst = (volatile uint32*)0xFF9800;
+					for (uint16 i=0; (i<count) && (i < 256); i++)
 					{
-						uint8* src = colors;
-						volatile uint16* dst = (volatile uint16*)0xFF8240;
-						for (uint16 i=0; (i<numcolors) && (i < 16); i++)
-						{
-							uint16 r = *src++; uint16 g = *src++; uint16 b = *src++;
-							uint16 rgb =((r & 0xE0) << 3) | ((r & 0x10) << 7) |
-										((g & 0xE0) >> 1) | ((g & 0x10) << 3) |
-										((b & 0xE0) >> 5) | ((b & 0x10) >> 1);
-							*dst++ = rgb;
-						}
-						memset((void*)0xFF9800, 0, 256*4);
-					}
-					#endif
-					{
-						uint8* src = colors;
-						volatile uint32* dst = (volatile uint32*)0xFF9800;
-						for (uint16 i=0; (i<numcolors) && (i < 256); i++)
-						{
-							uint32 r = *src++ & 0xFC;
-							uint32 g = *src++ & 0xFC;
-							uint32 b = *src++ & 0xFC;
-							uint32 rgb = (r << 24) | (g << 16) | b;
-							*dst++ = rgb;
-						}
+						uint32 r = *src++ & 0xFC;
+						uint32 g = *src++ & 0xFC;
+						uint32 b = *src++ & 0xFC;
+						uint32 rgb = (r << 24) | (g << 16) | b;
+						*dst++ = rgb;
 					}
 				}
-
-				case 4:		// Milan
-				{
-				}
-				break;
 			}
 		}
 	}
-	else if (shouldUpdateSoftwarePalette)
+	else if (updateSwPal)
 	{
+		D(bug(" soft palette %d\n", numcolors));
+
 		uint8* pal = colors;
 		switch (screen.pf & PF_MASK_BITS)
 		{
@@ -1788,6 +1843,7 @@ void VideoDriver::UpdatePalette()
 			break;
 		}
 	}
+	D(bug(" update palette done\n"));
 }
 
 void VideoDriver::AddMode(uint32 width, uint32 height, uint32 resolution_id, uint32 bytes_per_row, video_depth depth)
@@ -1808,22 +1864,154 @@ void VideoDriver::AddModes(uint32 width, uint32 height, video_depth depth)
 	uint32 id = 0x80;
 	AddMode(width, height, id++, TrivialBytesPerRow(width, depth), depth);
 
-	// add standard mac modes
-	if (width > 1600 && height > 1200)
-		AddMode(1600, 1200, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 1280 && height > 1024)
-		AddMode(1280, 1024, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 1152 && height > 870)
-		AddMode(1152, 870, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 1024 && height > 768)
-		AddMode(1024, 768, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 800 && height > 600)
-		AddMode(800, 600, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 640 && height > 480)
-		AddMode(640, 480, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 512 && height > 384)
-		AddMode(512, 384, id++, TrivialBytesPerRow(width, depth), depth);
-	if (width > 512 && height > 342)
-		AddMode(512, 342, id++, TrivialBytesPerRow(width, depth), depth);
+	// add lower resolution standard modes
+	#define AddStandardMode(x,y) { \
+		if (((width != (x)) || (height != (y))) && (width >= (x)) && (height >= (y))) { \
+			AddMode((x), (y), id++, TrivialBytesPerRow(width, depth), depth); \
+		} \
+	}
+
+	AddStandardMode(1600, 1200);
+	AddStandardMode(1280, 1024);
+	AddStandardMode(1152,  870);
+	AddStandardMode(1024,  768);
+	AddStandardMode( 800,  600);
+	AddStandardMode( 640,  480);
+	AddStandardMode( 512,  384);
+	AddStandardMode( 512,  342);
 }
 
+bool VideoDriver::ChangeShifterRez(int32 bpp)
+{
+	volatile uint8* shifter = 0;
+	uint8 newRez = 0;
+	uint8 oldRez = 0;
+	switch (screen.hw)
+	{
+		case HW_SHIFTER_ST:
+		case HW_SHIFTER_STE:
+			shifter = ((volatile uint8*)0xffff8260);
+			newRez = oldRez = *shifter & 0x3;
+			switch (bpp)
+			{
+				case 1:
+					newRez = 2;	// st-high
+					break;
+				case 2:
+					newRez = 1;	// st-medium
+					break;
+				case 4:
+					newRez = 0;	// st-low
+					break;
+			}
+			break;
+		case HW_SHIFTER_TT:
+			shifter = ((volatile uint8*)0xffff8262);
+			newRez = oldRez = *shifter & 0x7;
+			switch (bpp)
+			{
+				case 1:
+					newRez = 2;	// st-high
+					break;
+				case 2:
+					newRez = 1;	// st-medium
+					break;
+				case 4:
+					newRez = 4;	// tt-medium
+					break;
+				case 8:
+					newRez = 7;	// tt-low
+					break;
+			}
+			break;
+		default:
+			return false;
+	}
+	if (newRez == oldRez)
+		return false;
+
+	// replace mono reset handler
+	oldMonoHandler = *((volatile uint32*)0x46e);
+	*((volatile uint32*)0x46e) = VecRts;
+
+	// wait vblank
+	uint16 sr = DisableInterrupts();
+	uint16 zp = SetZeroPage(ZEROPAGE_OLD);
+	*((volatile uint32*)0x46e) = VecRts;
+	SetSR(0x2300);
+	Vsync();
+	SetZeroPage(zp);
+	SetSR(sr);
+
+	// set shifter
+	oldShifterRez = oldRez;
+	*shifter = (*shifter & 0xf8) | newRez;
+
+	// update screen info
+	switch (newRez)
+	{
+		case 0:
+			screen.pf = MODE_SHIFTER_4;	// st-low
+			screen.width = 320;
+			screen.height = 200;
+			break;
+		case 1:
+			screen.pf = MODE_SHIFTER_2;	// st-medium
+			screen.width = 640;
+			screen.height = 200;
+			break;
+		case 2:
+			screen.pf = MODE_SHIFTER_1;	// st-high
+			screen.width = 640;
+			screen.height = 400;
+			break;
+		case 4:
+			screen.pf = MODE_SHIFTER_4;	// tt-medium
+			screen.width = 640;
+			screen.height = 480;
+			break;
+		case 6:
+			screen.pf = MODE_SHIFTER_1;	// tt-high
+			screen.width = 1280;
+			screen.height = 960;
+			break;
+		case 7:
+			screen.pf = MODE_SHIFTER_8;	// tt-low
+			screen.width = 320;
+			screen.height = 480;
+			break;
+	}
+	screen.bpp = bpp;
+	screen.planes = bpp;
+	screen.bytesPerLine = (screen.width * screen.bpp) / 8;
+	return true;
+}
+
+void VideoDriver::RestoreShifterRez()
+{
+	volatile uint8* shifter = 0;
+	switch (screen.hw)
+	{
+		case HW_SHIFTER_ST:
+		case HW_SHIFTER_STE:
+			shifter = ((volatile uint8*)0xffff8260);
+			break;
+		case HW_SHIFTER_TT:
+			shifter = ((volatile uint8*)0xffff8262);
+			break;
+	}
+	if (shifter)
+	{
+		// wait vblank
+		uint16 sr = DisableInterrupts();
+		uint16 zp = SetZeroPage(ZEROPAGE_OLD);
+		SetSR(0x2300);
+		Vsync();
+		*shifter = (*shifter & 0xf8) | oldShifterRez;
+		Vsync();
+		SetZeroPage(zp);
+		SetSR(sr);		
+		oldShifterRez = 0xFF;
+		oldMonoHandler = 0;
+	}
+}

@@ -24,12 +24,14 @@
 #include <string.h>
 #include "prefs.h"
 
+
+
 // Platform-specific preferences items
 prefs_desc platform_prefs_items[] = {
 	{"_disk",			TYPE_STRING,	true,  "Disabled disk"},
 	{"diskdevmode",		TYPE_INT32,		false, "Device access mode"},
-	{"diskwritesync",	TYPE_BOOLEAN,	false, "Disk write sync"},
-	{"diskcache", 		TYPE_BOOLEAN, 	false, "Disk read cache"},
+	{"diskcache", 		TYPE_BOOLEAN, 	false, "Disk image cache"},
+	{"diskcachesize",	TYPE_INT32, 	false, "Disk image cache size"},
 	{"logging", 		TYPE_STRING, 	false, "Debug log output"},
 	{"logging_full", 	TYPE_BOOLEAN, 	false, "Log always"},
 	{"irqsafe", 		TYPE_BOOLEAN, 	false, "Allow Mac VBL during TOS calls"},
@@ -43,8 +45,6 @@ prefs_desc platform_prefs_items[] = {
 	{"video_mmu",		TYPE_BOOLEAN,	false, "MMU acceleration"},
 	{"video_cmp",		TYPE_BOOLEAN,	false, "CMP acceleration"},
 	{"video_debug",		TYPE_INT32,		false, "Video debugging"},
-
-
 	{NULL, TYPE_END, false, NULL} // End of list
 };
 
@@ -117,7 +117,7 @@ void AddPlatformPrefsDefaults(void)
 	PrefsReplaceInt32("ramsize", 0);		// autodetect
 	PrefsReplaceInt32("modelid", 0);		// autodetect
 	PrefsReplaceBool("fpu", true);			// use fpu if available
-	PrefsReplaceBool("nosound", true);		// no sound for now
+	PrefsReplaceBool("nosound", false);		// sound enabled
 	PrefsReplaceBool("nogui", false);		// gui enabled
 
 	PrefsAddInt32("sound_driver", 1);		// DMA sound
@@ -127,19 +127,17 @@ void AddPlatformPrefsDefaults(void)
 
 	PrefsAddString("logging", "file");		// log mode
 	PrefsAddBool("logging_full", false);	// log init only
-	PrefsAddBool("diskcache", false);		// disk cache
-	PrefsAddBool("irqsafe", false);			// tos irq workaround
+	PrefsAddBool("diskcache", true);		// disk cache enabled
+	PrefsAddBool("irqsafe", false);			// tos irq workaround disabled
 
 	PrefsAddInt32("diskdevmode", 3);		// device access enabled
 
 	PrefsAddInt32("mouse_speed", 8);		// mouse speed
 
 	PrefsAddBool("video_emu", true);		// enable emulation
-	PrefsAddBool("video_mmu", true);		// enable mmu acceleration
-	PrefsAddBool("video_cmp", true);		// enable hash acceleration
+	PrefsAddBool("video_mmu", true);		// mmu acceleration enabled
+	PrefsAddBool("video_cmp", false);		// hash acceleration disabled
 	PrefsAddBool("video_mode", 0);			// use desktop gfxmode
 	PrefsAddInt32("video_debug", 0);		// debug options
 	//PrefsReplaceInt32("frameskip", 2);
-
-	//PrefsAddBool("diskwritesync", false);		//
 }
