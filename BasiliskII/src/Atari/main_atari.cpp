@@ -59,7 +59,7 @@
 #include "stdarg.h"
 #endif
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 #if DEBUG
@@ -433,7 +433,7 @@ int super_main()
 	// Disable cpu cache when using 512K ROMs on 68040+
 	if ((ROMSize < (1024*1024)) && (HostCPUType >= 4))
 	{
-		D(bug("Disabling cpu cache (512k ROM on 68040+)\n"));
+		log("Disabling cpu cache (512k ROM on 68040+)\n");
 		uint16 sr = DisableInterrupts();
 		SetCACR(0);
 		SetSR(sr);
@@ -633,7 +633,7 @@ int main()
 // --------------------------------------------------------------------
 void QuitEmulator(void)
 {
-	D(bug("QuitEmulator...\n"));
+	log("QuitEmulator...\n");
 
 	DisableInterrupts();
 	RestoreZeroPage();
@@ -696,7 +696,7 @@ void ErrorAlert(const char *text)
 	}
 	else
 	{
-		D(bug("ERROR: %s\n", text));
+		log("ERROR: %s\n", text);
 	}
 }
 
@@ -712,7 +712,7 @@ void WarningAlert(const char *text)
 	}
 	else
 	{
-		D(bug("WARNING: %s\n"));
+		log("WARNING: %s\n");
 	}
 }
 

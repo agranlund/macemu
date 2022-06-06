@@ -25,7 +25,7 @@
 #include "asm_support.h"
 #include "debug_atari.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 extern void pmmu_68030_init(void);
@@ -242,19 +242,19 @@ void RestoreZeroPage()
 
 bool SetupZeroPage()
 {
-    D(bug("Setting up VBR\n"));
+    log("Setting up VBR\n");
     uint32* tosVbr = vbrTableTos;
     uint32* macVbr = vbrTableMac;
     ZPState[ZEROPAGE_TOS].vbr = tosVbr;
     ZPState[ZEROPAGE_MAC].vbr = macVbr;
 
-    D(bug(" oldVbr = 0x%08x\n", ZPState[ZEROPAGE_OLD].vbr));
-    D(bug(" tosVbr = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr));
-    D(bug(" macVbr = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr));
+    log(" oldVbr = 0x%08x\n", ZPState[ZEROPAGE_OLD].vbr);
+    log(" tosVbr = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr);
+    log(" macVbr = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr);
 
     if ((HostCPUType >= 4) && (ROMSize < (1024 * 1024)))
     {
-        D(bug("Disabling cpu cache (512k ROM on 68040+)\n"));
+        log("Disabling cpu cache (512k ROM on 68040+)\n");
         SetCACR(0);
     }
 
@@ -273,9 +273,9 @@ bool SetupZeroPage()
     #endif
 #endif
 
-    D(bug(" oldCacr = 0x%08x\n", ZPState[ZEROPAGE_OLD].cacr));
-    D(bug(" tosCacr = 0x%08x\n", ZPState[ZEROPAGE_TOS].cacr));
-    D(bug(" macCacr = 0x%08x\n", ZPState[ZEROPAGE_MAC].cacr));
+    log(" oldCacr = 0x%08x\n", ZPState[ZEROPAGE_OLD].cacr);
+    log(" tosCacr = 0x%08x\n", ZPState[ZEROPAGE_TOS].cacr);
+    log(" macCacr = 0x%08x\n", ZPState[ZEROPAGE_MAC].cacr);
 
     //---------------------------------------------------------------------
     //  Vectors
@@ -353,22 +353,22 @@ bool SetupZeroPage()
     //---------------------------------------------------------------------
     if (HostCPUType >= 4)
     {
-        D(bug(" Original:\n"));
-        D(bug(" tc:  %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.tc));
-        D(bug(" srp: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.srp));
-        D(bug(" urp: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.urp));
-        D(bug(" it0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.itt0));
-        D(bug(" dt0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.dtt0));
-        D(bug(" it1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.itt1));
-        D(bug(" dt1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.dtt1));
+        log(" Original:\n");
+        log(" tc:  %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.tc);
+        log(" srp: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.srp);
+        log(" urp: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.urp);
+        log(" it0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.itt0);
+        log(" dt0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.dtt0);
+        log(" it1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.itt1);
+        log(" dt1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m040.dtt1);
     }
     else
     {
-        D(bug(" tc:  %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.tc));
-        D(bug(" srp: %08x %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.srp[0], ZPState[ZEROPAGE_TOS].mmu.m030.srp[1])); 
-        D(bug(" crp: %08x %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.crp[0], ZPState[ZEROPAGE_TOS].mmu.m030.crp[1])); 
-        D(bug(" tt0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.ttr0));
-        D(bug(" tt1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.ttr1));
+        log(" tc:  %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.tc);
+        log(" srp: %08x %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.srp[0], ZPState[ZEROPAGE_TOS].mmu.m030.srp[1]);
+        log(" crp: %08x %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.crp[0], ZPState[ZEROPAGE_TOS].mmu.m030.crp[1]);
+        log(" tt0: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.ttr0);
+        log(" tt1: %08x\n", ZPState[ZEROPAGE_TOS].mmu.m030.ttr1);
         if ((ZPState[ZEROPAGE_OLD].mmu.m030.tc & 0x80000000) == 0)
         {
             memset(&ZPState[ZEROPAGE_OLD].mmu, 0, sizeof(ZPState[ZEROPAGE_OLD].mmu));
@@ -376,54 +376,54 @@ bool SetupZeroPage()
         }
     }
 
-    D(bug("Create MAC MMU config\n"));
+    log("Create MAC MMU config\n");
     if (HostCPUType >= 4)
     {
         InitMMU040();
-        D(bug(" tc:  %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.tc));
-        D(bug(" srp: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.srp));
-        D(bug(" urp: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.urp));
-        D(bug(" it0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.itt0));
-        D(bug(" dt0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.dtt0));
-        D(bug(" it1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.itt1));
-        D(bug(" dt1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.dtt1));        
+        log(" tc:  %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.tc);
+        log(" srp: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.srp);
+        log(" urp: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.urp);
+        log(" it0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.itt0);
+        log(" dt0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.dtt0);
+        log(" it1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.itt1);
+        log(" dt1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m040.dtt1);        
     }
     else
     {
         InitMMU030();
-        D(bug(" tc:  %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.tc));
-        D(bug(" srp: %08x %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.srp[0], ZPState[ZEROPAGE_MAC].mmu.m030.srp[1])); 
-        D(bug(" crp: %08x %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.crp[0], ZPState[ZEROPAGE_MAC].mmu.m030.crp[1])); 
-        D(bug(" tt0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.ttr0));
-        D(bug(" tt1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.ttr1));
+        log(" tc:  %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.tc);
+        log(" srp: %08x %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.srp[0], ZPState[ZEROPAGE_MAC].mmu.m030.srp[1]);
+        log(" crp: %08x %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.crp[0], ZPState[ZEROPAGE_MAC].mmu.m030.crp[1]);
+        log(" tt0: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.ttr0);
+        log(" tt1: %08x\n", ZPState[ZEROPAGE_MAC].mmu.m030.ttr1);
     }
 
 
-    D(bug("Flushing cache\n"));
+    log("Flushing cache\n");
     SetCACR(ZPState[ZEROPAGE_TOS].cacr);
-    D(bug("ZeroPage setup complete\n"));
+    log("ZeroPage setup complete\n");
     return true;
 }
 
 void InitMMU030()
 {
-    D(bug(" InitMMU030: Start\n"));
+    log(" InitMMU030: Start\n");
     pmmu_68030_init();
-    D(bug(" InitMMU030: Created\n"));
+    log(" InitMMU030: Created\n");
 }
 
 void InitMMU040()
 {
     uint16 sr = DisableInterrupts();
-    D(bug(" InitMMU040: Start\n"));
+    log(" InitMMU040: Start\n");
     setup_68040_pmmu();
     GetMMU040(&ZPState[ZEROPAGE_MAC].mmu.m040);
     SetMMU040(&ZPState[ZEROPAGE_OLD].mmu.m040);
-    D(bug(" InitMMU040: Created\n"));
-    D(bug(" InitMMU040: Flush ATC\n"));
+    log(" InitMMU040: Created\n");
+    log(" InitMMU040: Flush ATC\n");
     FlushATC040();
-    D(bug(" InitMMU040: Flush Cache\n"));
+    log(" InitMMU040: Flush Cache\n");
     SetCACR040(ZPState[ZEROPAGE_OLD].cacr);
     SetSR(sr);
-    D(bug(" InitMMU040: Done\n"));
+    log(" InitMMU040: Done\n");
 }

@@ -32,7 +32,7 @@
 #include "input_atari.h"
 #include "mint/cookie.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 #define SUPPORT_8ON16BIT		1
@@ -317,7 +317,7 @@ bool QueryScreen(ScreenDesc& scr)
 	log(" Virtual workstation: %d\n", vdi_handle);
 	if (vdi_handle < 1)
 	{
-		D(bug(" Failed opening VDI workstation\n"));
+		log(" Failed opening VDI workstation\n");
 		return false;
 	}
 
@@ -623,7 +623,7 @@ bool VideoInit(bool classic)
 
 void VideoExit(void)
 {
-	D(bug("VideoExit\n"));
+	log("VideoExit\n");
 	if (drv)
 	{
 		drv->Release();
@@ -1854,7 +1854,7 @@ void VideoDriver::AddMode(uint32 width, uint32 height, uint32 resolution_id, uin
 	mode.resolution_id = resolution_id;
 	mode.bytes_per_row = bytes_per_row;
 	mode.depth = depth;
-	D(bug("   Added video mode: w=%ld  h=%ld  d=%ld\n", width, height, depth));
+	log("   Added video mode: w=%ld  h=%ld  d=%ld\n", width, height, depth);
 	videoModes.push_back(mode);
 }
 

@@ -30,7 +30,7 @@
 #include "mint/cookie.h"
 #include "version.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 extern int HostCPUType;
@@ -332,7 +332,7 @@ static const char* update_logmode(int16 mode)
 
 bool PrefsEditor(void)
 {
-	D(bug("Entering Prefs editor\n"));
+	log("Entering Prefs editor\n");
 	rsrc_gaddr(R_TREE, FORM_MAIN, &formMain);
 	if (formMain == NULL)
 		return false;
@@ -772,7 +772,7 @@ bool PrefsEditor(void)
 	D(bug("Cleanup\n"));
 	for (uint16 i=0; windows[i] != NULL; i++)
 		windows[i]->Destroy();
-	D(bug("Exiting Prefs editor\n"));
+	log("Exiting Prefs editor\n");
 	Mfree(tempdata);
 	return (done > 0);
 }

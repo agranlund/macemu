@@ -26,7 +26,7 @@
 #include "asm_support.h"
 #include "prefs.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 #define IKBD_STATE_RESET    0
@@ -237,7 +237,7 @@ extern "C" void VecAciaC()
 
 void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
 {
-    D(bug("InitInput %d, %d\n", resx, resy));
+    log("InitInput %d, %d\n", resx, resy);
     if (!input_inited)
     {
         // mouse prefs

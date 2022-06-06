@@ -23,7 +23,7 @@
 #include "asm_support.h"
 #include "debug_atari.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 
 static const uint32 MMU_TABLE  = 0x02;
@@ -53,7 +53,7 @@ static uint32* tid = 0;
 
 void pmmu_68030_init()
 {
-    D(bug(" pmmu_68030_init: Start\n"));
+    log(" pmmu_68030_init: Start\n");
     const uint32 is_bits = 0;
 
     // prealloc all tia,tib,tic & one tid
@@ -82,12 +82,12 @@ void pmmu_68030_init()
     tic = tib + tib_size;
     tid = tic + tic_size;
 
-    D(bug("   mem  = 0x%08x (%d)\n", mem, memSize));
-    D(bug("   zero = 0x%08x (%d)\n", zeroPhys, zeroSize));
-    D(bug("   tia = 0x%08x (%d, %d)\n", tia, num_tia_tables, 4 * tia_size));
-    D(bug("   tib = 0x%08x (%d, %d)\n", tib, num_tib_tables, 4 * tib_size));
-    D(bug("   tic = 0x%08x (%d, %d)\n", tic, num_tic_tables, 4 * tic_size));
-    D(bug("   tid = 0x%08x (%d, %d)\n", tid, num_tid_tables, 4 * tid_size));
+    log("   mem  = 0x%08x (%d)\n", mem, memSize);
+    log("   zero = 0x%08x (%d)\n", zeroPhys, zeroSize);
+    log("   tia = 0x%08x (%d, %d)\n", tia, num_tia_tables, 4 * tia_size);
+    log("   tib = 0x%08x (%d, %d)\n", tib, num_tib_tables, 4 * tib_size);
+    log("   tic = 0x%08x (%d, %d)\n", tic, num_tic_tables, 4 * tic_size);
+    log("   tid = 0x%08x (%d, %d)\n", tid, num_tid_tables, 4 * tid_size);
 
     // default table
     for (uint16 i=0; i<(1<<tia_bits); i++)
@@ -159,7 +159,7 @@ void pmmu_68030_init()
         (tid_bits <<  0) |
         0x80000000;
 
-    D(bug(" pmmu_68030_init: Done\n"));
+    log(" pmmu_68030_init: Done\n");
 }
 
 uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag)
@@ -173,7 +173,7 @@ uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag
     logaddr = (uint32*) (logaddr & ~(pagesize - 1));
     physaddr = (uint32*) (physaddr & ~(pagesize - 1));
 
-    D(bug(" pmmu_68030_map: %08x -> %08x (%d pages) (%x flag)\n", logaddr, physaddr, numpages, flag))
+    D(bug(" pmmu_68030_map: %08x -> %08x (%d pages) (%x flag)\n", logaddr, physaddr, numpages, flag));
 
     const uint16 tia_shift = 32 - (tia_bits);
     const uint16 tib_shift = 32 - (tia_bits + tib_bits);
@@ -257,6 +257,5 @@ uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag
     {
         D(bug("** %d = %08x : %08x\n", i, &tidmembase[i], tidmembase[i]));
     }
-
     return returnptr;
 }

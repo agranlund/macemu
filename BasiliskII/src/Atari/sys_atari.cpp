@@ -27,7 +27,7 @@
 #include "zeropage.h"
 #include "mint/cookie.h"
 
-#define DEBUG 1
+#define DEBUG 0
 #include "debug.h"
 #define SUPPORT_RAW			1
 #define SUPPORT_DEV			1
@@ -258,8 +258,8 @@ void SysInit(void)
 #endif
 
 	int32 devmode = PrefsFindInt32("diskdevmode");
-	D(bug(" XHDI: %d : %s\n", (devmode & 1) ? 1 : 0, xhdi ? "Yes" : "No"));
-	D(bug(" AHDI: %d : %04x\n", (devmode & 2) ? 1 : 0, ahdi ? ahdi->version : 0));
+	log(" XHDI: %d : %s\n", (devmode & 1) ? 1 : 0, xhdi ? "Yes" : "No");
+	log(" AHDI: %d : %04x\n", (devmode & 2) ? 1 : 0, ahdi ? ahdi->version : 0);
 
 	if ((devmode & 1) == 0)
 		xhdi = 0;
@@ -361,7 +361,7 @@ void *Sys_open(const char *name, bool read_only)
 	for (uint16 i=0; i<strlen(fixedname); i++)
 		if (fixedname[i] == '\\')
 			fixedname[i] = '/';
-	D(bug("Sys_open: '%s'\n", fixedname));
+	log("Sys_open: '%s'\n", fixedname);
 	#endif
 
 	// direct device access, requires xhdi
@@ -372,7 +372,7 @@ void *Sys_open(const char *name, bool read_only)
 		int32 dmin = -1;
 		if (sscanf(name, "dev:%ld.%ld:%lu:%lu", &dmaj, &dmin, &dev_blockstart, &dev_blocks) < 4)
 		{
-			D(bug(" Err: invalid dev format\n"));
+			log(" Err: invalid dev format\n");
 			return NULL;
 		}
 		dev_major = (int16) dmaj;
@@ -389,7 +389,7 @@ void *Sys_open(const char *name, bool read_only)
 				int32 result = xhdi(p);
 				if (result >= 0) {
 					if ((dev_blockstart + dev_blocks) > totalblocks) {
-						D(bug(" Err: Requested block range does not fit (%d - %d : %d)\n", dev_blockstart, dev_blockstart + dev_blocks, totalblocks));
+						log(" Err: Requested block range does not fit (%d - %d : %d)\n", dev_blockstart, dev_blockstart + dev_blocks, totalblocks);
 						return NULL;
 					}
 				}
@@ -400,7 +400,7 @@ void *Sys_open(const char *name, bool read_only)
 				XHInqTargetParams p = {1, dev_major, dev_minor, &dev_blocksize, 0, dev_name };
 				int32 result = xhdi(p);
 				if (result < 0) {
-					D(bug(" Err: XHInqTarget for device %d.%d returned %d\n", dev_major, dev_minor, result));
+					log(" Err: XHInqTarget for device %d.%d returned %d\n", dev_major, dev_minor, result);
 					return NULL;
 				}
 			}
@@ -414,7 +414,7 @@ void *Sys_open(const char *name, bool read_only)
 		}
 
 	#else
-	D(bug(" Err: dev support is disabled\n"));
+	log(" Err: dev support is disabled\n");
 	return NULL;
 	#endif //SUPPORT_DEV
 	}
@@ -432,7 +432,7 @@ void *Sys_open(const char *name, bool read_only)
 		if ((dev_letter >= 'A') && (dev_letter <= 'Z'))
 			dev_letter = (dev_letter - 'A') + 'a';
 		if ((dev_letter < 'a') || (dev_letter >'z')) {
-			D(bug(" Err: Invalid drive letter '%c'\n", dev_letter));
+			log(" Err: Invalid drive letter '%c'\n", dev_letter);
 			return NULL;
 		}
 		int16 biosdev = dev_letter - 'a';
@@ -450,7 +450,7 @@ void *Sys_open(const char *name, bool read_only)
 			dev_blocks = 2880;
 			dev_valid = true;
 		#else
-			D(bug(" Err: floppy is not yet supported\n"));
+			log(" Err: floppy is not yet supported\n");
 			return NULL;
 		#endif
 		}
@@ -466,11 +466,11 @@ void *Sys_open(const char *name, bool read_only)
 				XHInqDevParams2 p = {12, biosdev, &dev_major, &dev_minor, &dev_blockstart, &devbpb, &dev_blocks, partid};
 				result = xhdi(p);
 				if (result < 0) {
-					D(bug(" Err: XHInqDev for '%c' returned %d\n", dev_letter, result));
+					log(" Err: XHInqDev for '%c' returned %d\n", dev_letter, result);
 					return NULL;
 				}
 				if ((strncmp(partid, "RAW", 3) != 0) && (strncmp(partid, "MAC", 3) == 0)) {
-					D(bug(" Err: device '%c' is not a RAW or MAC partition ['%s']\n", dev_letter, partid));
+					log(" Err: device '%c' is not a RAW or MAC partition ['%s']\n", dev_letter, partid);
 					return NULL;
 				}
 			}
@@ -484,10 +484,10 @@ void *Sys_open(const char *name, bool read_only)
 				XHInqDriverParams p = {8, biosdev, driver_name, driver_ver, 0, &driver_ahdi, &driver_ipl };
 				result = xhdi(p);
 				if (result < 0) {
-					D(bug(" Err: XHInqDriver for '%c' returned %d\n", dev_letter, result));
+					log(" Err: XHInqDriver for '%c' returned %d\n", dev_letter, result);
 					return NULL;
 				}
-				D(bug(" Driver: %s %s\n", driver_name, driver_ver));
+				log(" Driver: %s %s\n", driver_name, driver_ver);
 			}
 			// device info
 			{
@@ -496,7 +496,7 @@ void *Sys_open(const char *name, bool read_only)
 				XHInqTargetParams p = {1, dev_major, dev_minor, &dev_blocksize, &flags, dev_name };
 				result = xhdi(p);
 				if (result < 0) {
-					D(bug(" Err: XHInqTarget for device %d.%d returned %d\n", dev_major, dev_minor, result));
+					log(" Err: XHInqTarget for device %d.%d returned %d\n", dev_major, dev_minor, result);
 					return NULL;
 				}
 			}
@@ -506,11 +506,11 @@ void *Sys_open(const char *name, bool read_only)
 		else if (ahdi)
 		{
 			if (biosdev >= 16) {
-				D(bug(" Err: AHDI device letter '%c' is not supported (max '%d')\n", dev_letter, 15 + 'a'));
+				log(" Err: AHDI device letter '%c' is not supported (max '%d')\n", dev_letter, 15 + 'a');
 				return NULL;
 			}
 			if (ahdi->flags[biosdev] & PUN_VALID) {
-				D(bug(" Err: AHDI device '%c' is not valid\n", dev_letter));
+				log(" Err: AHDI device '%c' is not valid\n", dev_letter);
 				return NULL;
 			}
 
@@ -530,7 +530,7 @@ void *Sys_open(const char *name, bool read_only)
 			}
 
 			if (req_partition_size + dev_blocks == 0) {
-				D(bug(" Err: Unable to resolve size for '%c'\n", dev_letter));
+				log(" Err: Unable to resolve size for '%c'\n", dev_letter);
 				return NULL;
 			}
 
@@ -554,14 +554,14 @@ void *Sys_open(const char *name, bool read_only)
 			{
 				// but subtract custom offset if one is used
 				if (dev_blocks <= req_partition_offset) {
-					D(bug(" Err: partition offset %d is too large for size %d\n", req_partition_offset, dev_blocks));
+					log(" Err: partition offset %d is too large for size %d\n", req_partition_offset, dev_blocks);
 					return NULL;
 				}
 				dev_blocks -= req_partition_offset;
 			}
 		}
 	#else
-		D(bug(" Err: raw support is disabled\n"));
+		log(" Err: raw support is disabled\n");
 		return NULL;
 	#endif // SUPPORT_RAW
 	}
@@ -571,31 +571,31 @@ void *Sys_open(const char *name, bool read_only)
 	{
 		// sanity check results
 		if ((dev_major < 0) || (dev_minor < 0)) {
-			D(bug(" Err: Invalid device %d.%d\n", dev_major, dev_minor));
+			log(" Err: Invalid device %d.%d\n", dev_major, dev_minor);
 			return NULL;
 		}
 		if (dev_blocks == 0) {
-			D(bug(" Err: Invalid block count (%d)\n", dev_blocks));
+			log(" Err: Invalid block count (%d)\n", dev_blocks);
 			return NULL;
 		}
 		if (dev_blocksize != 512) {
-			D(bug(" Err: Invalid block size (%d)\n", dev_blocksize));
+			log(" Err: Invalid block size (%d)\n", dev_blocksize);
 			return NULL;
 		}
 
 		// good to go!
-		D(bug(" Device: %d.%d : %s\n", dev_major, dev_minor, dev_name));
-		D(bug(" Size:   %d.%1dMB (%d blocks of %d from %d)\n",
+		log(" Device: %d.%d : %s\n", dev_major, dev_minor, dev_name);
+		log(" Size:   %d.%1dMB (%d blocks of %d from %d)\n",
 			(dev_blocks * dev_blocksize) / (1024 * 1024),
 			((dev_blocks * dev_blocksize) % (1024 * 1024)) / 100000,
 			dev_blocks,
 			dev_blocksize,
-			dev_blockstart));
+			dev_blockstart);
 
 		fh = new file_handle;
 		if (fh == NULL)
 		{
-			D(bug(" Err: File handle is null. out of memory?\n"));
+			log(" Err: File handle is null. out of memory?\n");
 			return NULL;
 		}
 		fh->id = num_disks++;
@@ -658,7 +658,7 @@ void *Sys_open(const char *name, bool read_only)
 			fh = new file_handle;
 			if (fh == NULL)
 			{
-				D(bug(" Err: File handle is null. out of memory?\n"));
+				log(" Err: File handle is null. out of memory?\n");
 				return NULL;
 			}
 			fh->id = num_disks++;
@@ -671,7 +671,7 @@ void *Sys_open(const char *name, bool read_only)
 			// Detect disk image file layout
 			int32 size = Fseek(0, f, SEEK_END);
 			Fseek(f, 0, SEEK_SET);
-			D(bug(" Disk size = %d\n", size));
+			log(" Disk size = %d\n", size);
 			Fread(f, 256, sys_tempbuf);
 			FileDiskLayout(size, sys_tempbuf, fh->start_byte, fh->size);
 			fh->cur_pos = 256;
@@ -679,7 +679,7 @@ void *Sys_open(const char *name, bool read_only)
 		}
 	}
 
-	D(bug(" Err: Failed\n"));
+	log(" Err: Failed\n");
 	return NULL;
 }	
 
@@ -691,7 +691,7 @@ void *Sys_open(const char *name, bool read_only)
 void Sys_close(void *arg)
 {
 	DISK_ACCESS();
-	D(bug("Sys_close(%08lx)\n", arg));
+	log("Sys_close(%08lx)\n", arg);
 
 	file_handle *fh = (file_handle *)arg;
 	if (!fh)
@@ -745,7 +745,7 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 		uint32 start = (fh->start_byte + offset) >> 9;
 		uint16 count = length >> 9;
 		int32 result = -1;
-		#ifdef HEAVYDEBUG
+		#if DEBUG
 		D(bug("Sys_read [%02d] device %d.%d : %d blocks at %d\n", fh->id, dev_major, dev_minor, count, start));
 		if ((length & 511) || ((fh->start_byte + offset) & 511))
 		{
@@ -812,9 +812,7 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 		DISK_ACCESS();
 
 		// Read data
-		#ifdef HEAVYDEBUG
 		D(bug("Sys_read [%d] file read %d : %d\n", fh->id, offset, length));
-		#endif
 
 		#if SUPPORT_CACHE
 		if (cache_count > 0)
@@ -923,7 +921,7 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 		uint16 count = length >> 9;
 		int32 result = 0;
 
-		#ifdef HEAVYDEBUG
+		#if DEBUG
 		D(bug("Sys_write [%02d] device %d.%d : %d blocks at %d\n", fh->id, dev_major, dev_minor, count, start));
 		if ((length & 511) || ((fh->start_byte + offset) & 511))
 		{
