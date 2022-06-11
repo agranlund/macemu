@@ -3,6 +3,7 @@
 	.globl _c2p1x1_4_from_4_060
 
 _c2p1x1_4_from_4:
+_c2p1x1_4_from_4_060:
 	movem.l	d2-d7/a2-a6,-(sp)
 
 	move.l	44+4(sp),a1			// a1 = planar
@@ -55,6 +56,9 @@ _c2p1x1_4_from_4:
 	or.b	d2,d1			// fjndhlpb
 	ror.l	#4,d1			// bfjndhlp
 
+	not.l	d0
+	not.l	d1
+
 	add.l	#8,a0
 
 	// a3a2a1a0e3e2e1e0 i3i2i1i0m3m2m1m0 c3c2c1c0g3g2g1g0 k3k2k1k0o3o2o1o0
@@ -105,7 +109,7 @@ _c2p1x1_4_from_4:
 
 
 
-
+/*
 _c2p1x1_4_from_4_060: // Thx MiKRO!
 	move.l  4(sp),a1 // Planer
 	move.l  8(sp),a0 // Chunky start
@@ -266,4 +270,4 @@ _c2p1x1_4_from_4_060: // Thx MiKRO!
 	movem.l	(sp)+,d2-d7/a2-a6
 	rts
 
-	  
+*/	  

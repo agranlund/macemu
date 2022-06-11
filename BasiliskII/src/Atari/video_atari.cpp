@@ -38,6 +38,7 @@
 #define SUPPORT_8ON16BIT		1
 #define ENABLE_VIDEODEBUG		0
 #define DEBUG_MMU				0
+#define DEBUG_CMP				0
 
 #define DBGFLAG_FORCE_REDRAW	(1<<0)
 #define DBGFLAG_NO_HWPAL		(1<<1)
@@ -813,48 +814,49 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		shouldUpdateHardwarePalette = false;
 #endif
 
-	if (screen.bpp <= 8)
+	if (shouldUpdateVdiPalette)
 	{
-		uint16 count = (1 << screen.bpp);
-		if (shouldUpdateVdiPalette)
+		// backup existing vdi palette
+		log (" Backing up vdi palette\n");
+		uint16 count = (screen.bpp <= 8) ? (1 << screen.bpp) : 0;
+		if (count)
 		{
-			// backup existing vdi palette
-			log (" Backing up vdi palette\n");
 			memset(tosVdiPal, 0, 512*3);
 			for (int16 i=0; i<count; i++) {
 				vq_color(screen.handle, i, 1, &tosVdiPal[i*3]);
 			}
 		}
+	}
 
+	if (shouldUpdateHardwarePalette)
+	{
 		// backup existing hw palette
-		if (shouldUpdateHardwarePalette)
+		log (" Backing up hw palette\n");
+		uint16 count = (screen.bpp <= 8) ? (1 << screen.bpp) : 1;
+		switch (screen.hw)
 		{
-			log (" Backing up hw palette\n");
-			switch (screen.hw)
+			case HW_SHIFTER_ST:
+			case HW_SHIFTER_STE:
 			{
-				case HW_SHIFTER_ST:
-				case HW_SHIFTER_STE:
-				{
-					volatile uint16* p = (volatile uint16*)0xFF8240;
-					for (uint16 i=0; (i<count) && (i < 16); i++)
-						tosHwPal[i] = p[i];
-				}
-				break;
-				case HW_SHIFTER_TT:
-				{
-					volatile uint16* p = (volatile uint16*)0xFF8400;
-					for (uint16 i=0; (i<count) && (i < 256); i++)
-						tosHwPal[i] = p[i];
-				}
-				break;
-				case HW_VIDEL:
-				{
-					volatile uint32* p = (volatile uint32*)0xFF9800;
-					for (uint16 i=0; (i<count) && (i < 256); i++)
-						tosHwPal[i] = p[i];
-				}
-				break;
+				volatile uint16* p = (volatile uint16*)0xFF8240;
+				for (uint16 i=0; (i<count) && (i < 16); i++)
+					tosHwPal[i] = p[i];
 			}
+			break;
+			case HW_SHIFTER_TT:
+			{
+				volatile uint16* p = (volatile uint16*)0xFF8400;
+				for (uint16 i=0; (i<count) && (i < 256); i++)
+					tosHwPal[i] = p[i];
+			}
+			break;
+			case HW_VIDEL:
+			{
+				volatile uint32* p = (volatile uint32*)0xFF9800;
+				for (uint16 i=0; (i<count) && (i < 256); i++)
+					tosHwPal[i] = p[i];
+			}
+			break;
 		}
 	}
 
@@ -1048,48 +1050,45 @@ void VideoDriver::Release()
 	if (!init_ok)
 		return;
 
-	if (screen.bpp <= 8)
+	// restore original vdi palette
+	if (shouldUpdateVdiPalette)
 	{
-		uint16 count = (1 << screen.bpp);
-
-		// restore original vdi palette
-		if (shouldUpdateVdiPalette)
+		if (screen.handle)
 		{
-			if (screen.handle)
-			{
-				for (int16 i=0; i<count; i++)
-					vs_color(screen.handle, i, &tosVdiPal[i*3]);
-			}
+			uint16 count = (screen.bpp <= 8) ? (1 << screen.bpp) : 0;
+			for (int16 i=0; i<count; i++)
+				vs_color(screen.handle, i, &tosVdiPal[i*3]);
 		}
+	}
 
-		// restore original hw palette
-		if (shouldUpdateHardwarePalette)
+	// restore original hw palette
+	if (shouldUpdateHardwarePalette)
+	{
+		uint16 count = (screen.bpp <= 8) ? (1 << screen.bpp) : 1;
+		switch (screen.hw)
 		{
-			switch (screen.hw)
+			case HW_SHIFTER_ST:
+			case HW_SHIFTER_STE:
 			{
-				case HW_SHIFTER_ST:
-				case HW_SHIFTER_STE:
-				{
-					volatile uint16* p = (volatile uint16*)0xFF8240;
-					for (uint16 i=0; (i < count) && (i < 16); i++)
-						p[i] = tosHwPal[i];
-				}
-				break;
-				case HW_SHIFTER_TT:
-				{
-					volatile uint16* p = (volatile uint16*)0xFF8400;
-					for (uint16 i=0; (i < count) && (i < 256); i++)
-						p[i] = tosHwPal[i];
-				}
-				break;
-				case HW_VIDEL:
-				{
-					volatile uint32* p = (volatile uint32*)0xFF9800;
-					for (uint16 i=0; (i < count) && (i < 256); i++)
-						p[i] = tosHwPal[i];
-				}
-				break;
+				volatile uint16* p = (volatile uint16*)0xFF8240;
+				for (uint16 i=0; (i < count) && (i < 16); i++)
+					p[i] = tosHwPal[i];
 			}
+			break;
+			case HW_SHIFTER_TT:
+			{
+				volatile uint16* p = (volatile uint16*)0xFF8400;
+				for (uint16 i=0; (i < count) && (i < 256); i++)
+					p[i] = tosHwPal[i];
+			}
+			break;
+			case HW_VIDEL:
+			{
+				volatile uint32* p = (volatile uint32*)0xFF9800;
+				for (uint16 i=0; (i < count) && (i < 256); i++)
+					p[i] = tosHwPal[i];
+			}
+			break;
 		}
 	}
 
@@ -1274,6 +1273,10 @@ bool VideoDriver::Setup()
 	if ((videoDebug & DBGFLAG_NO_CLEAR) == 0)
 #endif
 	{
+		// change border color in truecolor mode
+		if (shouldUpdateHardwarePalette && (screen.hw == HW_VIDEL) && (screen.bpp > 8))
+			*((volatile uint32*)0xFF9800) = 0;
+
 		uint8 clearColor = (screen.bpp > 8) ? 0xFF : 0x00;
 		memset((void*)screen.addr, clearColor, screen.bytesPerLine * screen.height);
 	}
@@ -1299,14 +1302,14 @@ void VideoDriver::GrayPage()
 		return;
 #endif
 	D(bug("graypage start\n"));
-	uint8 c = (screen.bpp > 8) ? 0x00 : 0xFF;
-	memset((void*)screen.addr, c, screen.bytesPerLine * screen.height);
+	uint8 col = ((screen.bpp > 8) || blitFunc) ? 0x00 : 0xFF;
+	memset((void*)screen.addr, col, screen.bytesPerLine * screen.height);
 	if (emulatedScreen && monitor)
 	{
 		D(bug(" graypage emuscreen\n"));
 		const video_mode& mode = monitor->get_current_mode();
-		c = (mode.depth > VDEPTH_8BIT) ? 0x00 : 0xFF;
-		memset(emulatedScreen, 0, mode.y * mode.bytes_per_row);
+		col = (mode.depth > VDEPTH_8BIT) ? 0x00 : 0xFF;
+		memset(emulatedScreen, col, mode.y * mode.bytes_per_row);
 		fullRedraw = true;
 	}
 	D(bug(" graypage done\n"));
@@ -1334,31 +1337,35 @@ void VideoDriver::SetPalette(uint8 *pal, int num)
 
 void VideoDriver::Update()
 {
-	static int16 frameSkipper = 0;
+	// emulation
 	if (blitFunc)
 	{
+		static int16 frameSkipper = 0;
 		frameSkipper++;
 		if (frameSkipper <= frameSkip)
 			return;
 		frameSkipper = 0;
-	}
 
-	if (macPaletteDirty && shouldDelayPaletteUpdate)
+		if (macPaletteDirty && shouldDelayPaletteUpdate)
+		{
+			UpdatePalette(macPalette, macPaletteDirty);
+			macPaletteDirty = 0;
+			if (fullRedraw)
+				frameSkipper = -2;
+		}
+
+		UpdateScreen();
+	}
+	// native
+	else if (macPaletteDirty && shouldDelayPaletteUpdate)
 	{
 		UpdatePalette(macPalette, macPaletteDirty);
 		macPaletteDirty = 0;
-		if (fullRedraw)
-			frameSkipper = -2;
 	}
-
-	UpdateScreen();
 }
 
 void VideoDriver::UpdateScreen()
 {
-	if (blitFunc == NULL)
-		return;
-
 #if ENABLE_VIDEODEBUG
 	if (videoDebug & DBGFLAG_FORCE_REDRAW)
 		fullRedraw = true;
@@ -1494,7 +1501,6 @@ void VideoDriver::UpdateScreen()
 			uint32* page = pageTable;
 			const uint32* lastPage = pageTable + pageCount;
 			const uint32 pageSizeDst = ((uint32(pageSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-
 			if ((hashSize == 0) || (compareBuffer == NULL))
 			{
 				// no compare acceleration
@@ -1638,6 +1644,9 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 	bool updateHwPal = shouldUpdateHardwarePalette;
 	bool updateSwPal = shouldUpdateSoftwarePalette;
 	bool updateVdiPal = shouldUpdateVdiPalette;
+	bool invertPalette = blitFunc ? true : false;
+
+	#define ConvertPaletteIdx(x)	invertPalette ? (~x & mask) : x
 
 	if (screen.bpp <= 8)
 	{
@@ -1692,6 +1701,7 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 			}
 
 			colors = (uint8*)hardPalette;
+			invertPalette = false;
 			numcolors = 16;
 			fullRedraw = true;
 			updateSwPal = false;
@@ -1700,12 +1710,13 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 		// update vdi palette
 		if (updateVdiPal)
 		{
+			// todo: only process changed colors?
 			uint8* pal = colors;
 			const uint16 max = (1 << screen.bpp);
 			const uint16 count = numcolors > max ? max : numcolors;
 			D(bug(" vdi palette %d (%d)\n", numcolors, count));
 			{
-				TOS_CONTEXT_NOIRQ();
+				TOS_CONTEXT();
 				for (uint16 i=0; i<count; i++)
 				{
 					uint16 c;
@@ -1714,7 +1725,10 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 					c = (uint16) *pal++; rgb[1] = ScaleColorValueForVdi(c);
 					c = (uint16) *pal++; rgb[2] = ScaleColorValueForVdi(c);
 					uint8 pen = screen.vdiPen[i];
-					vs_color(screen.handle, (short) pen, (const short*) rgb);
+					{
+						//TOS_CONTEXT_NOIRQ();
+						vs_color(screen.handle, (short) pen, (const short*) rgb);
+					}
 				}
 			}
 		}
@@ -1723,6 +1737,7 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 		if (updateHwPal)
 		{
 			const uint16 max = (1 << screen.bpp);
+			const uint16 mask = (max - 1);
 			const uint16 count = numcolors > max ? max : numcolors;
 			D(bug(" hw palette %d\n", count));
 			switch (screen.hw)
@@ -1738,7 +1753,8 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 						uint16 rgb =((r & 0xE0) << 3) | ((r & 0x10) << 7) |
 									((g & 0xE0) >> 1) | ((g & 0x10) << 3) |
 									((b & 0xE0) >> 5) | ((b & 0x10) >> 1);
-						*dst++ = rgb;
+
+						dst[ConvertPaletteIdx(i)] = rgb;
 					}
 				}
 				break;
@@ -1754,7 +1770,7 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 						uint16 g = *src++ & 0xF0;
 						uint16 b = *src++ & 0xF0;
 						uint16 rgb = (r << 4) | g | (b >> 4);
-						*dst++ = rgb;
+						dst[ConvertPaletteIdx(i)] = rgb;
 					}
 				}
 				break;
@@ -1769,7 +1785,7 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 						uint32 g = *src++ & 0xFC;
 						uint32 b = *src++ & 0xFC;
 						uint32 rgb = (r << 24) | (g << 16) | b;
-						*dst++ = rgb;
+						dst[ConvertPaletteIdx(i)] = rgb;
 					}
 				}
 			}
@@ -1778,7 +1794,6 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 	else if (updateSwPal)
 	{
 		D(bug(" soft palette %d\n", numcolors));
-
 		uint8* pal = colors;
 		switch (screen.pf & PF_MASK_BITS)
 		{

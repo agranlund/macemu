@@ -19,6 +19,10 @@ _c2p1x1_8_from_8_060:
 	move.l	(a0)+,d1
 	move.l	(a0)+,d2
 	move.l	(a0)+,d3
+	not.l	d0
+	not.l	d1
+	not.l	d2
+	not.l	d3
 
 	// a7a6a5a4a3a2a1a0 b7b6b5b4b3b2b1b0 c7c6c5c4c3c2c1c0 d7d6d5d4d3d2d1d0
 	// e7e6e5e4e3e2e1e0 f7f6f5f4f3f2f1f0 g7g6g5g4g3g2g1g0 h7h6h5h4h3h2h1h0
@@ -71,6 +75,10 @@ _c2p1x1_8_from_8_060:
 	move.l	(a0)+,d1
 	move.l	(a0)+,d2
 	move.l	(a0)+,d3
+	not.l	d0
+	not.l	d1
+	not.l	d2
+	not.l	d3
 
 	// a7a6a5a4a3a2a1a0 b7b6b5b4b3b2b1b0 c7c6c5c4c3c2c1c0 d7d6d5d4d3d2d1d0
 	// e7e6e5e4e3e2e1e0 f7f6f5f4f3f2f1f0 g7g6g5g4g3g2g1g0 h7h6h5h4h3h2h1h0
