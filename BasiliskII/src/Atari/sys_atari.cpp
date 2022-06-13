@@ -355,14 +355,12 @@ void *Sys_open(const char *name, bool read_only)
 	uint32 dev_blockstart = 0;
 	char dev_name[33] = {0};
 
-	#if DEBUG
 	char* fixedname = (char*)sys_tempbuf;
 	strncpy(fixedname, name, 254);
 	for (uint16 i=0; i<strlen(fixedname); i++)
 		if (fixedname[i] == '\\')
 			fixedname[i] = '/';
 	log("Sys_open: '%s'\n", fixedname);
-	#endif
 
 	// direct device access, requires xhdi
 	if (strncmp(name, "dev:", 4) == 0)
