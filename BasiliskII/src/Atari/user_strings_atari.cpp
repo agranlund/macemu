@@ -24,6 +24,12 @@
 
 // Platform-specific string definitions
 user_string_def platform_strings[] = {
+	// Common strings that have a platform-specific variant
+	{STR_VOLUME_IS_MOUNTED_WARN, "The volume '%s' is mounted on Atari. Basilisk II will try to unmount it."},
+	{STR_EXTFS_CTRL, "Atari Root"},
+	{STR_EXTFS_NAME, "Atari Directory Tree"},
+	{STR_EXTFS_VOLUME_NAME, "Atari"},
+
 	{-1, (const char*) NULL}	// End marker
 };
 

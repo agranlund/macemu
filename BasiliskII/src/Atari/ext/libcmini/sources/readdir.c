@@ -31,16 +31,50 @@
 
 struct dirent *readdir(DIR *d)
 {
+	struct dbuf {
+		long ino;
+		char name[NAME_MAX + 1];
+	} dbuf;    
     long r;
     _DTA *olddta;
     struct dirent *dd = &d->buf;
 
-    if (d == NULL)
-    {
+    if (d == NULL) {
         __set_errno(EBADF);
         return NULL;
     }
-    
+    /*
+	if (d->magic != __DIR_MAGIC) {
+		__set_errno (EFAULT);
+		return NULL;
+	}
+    */
+
+	if (d->handle != 0xff000000L)  {
+		/* The directory descriptor was optained by calling Dopendir(), as
+		 * there is a valid handle.
+		 */
+		r = (int)Dreaddir((int)(NAME_MAX+1+sizeof(long)), d->handle, (char *) &dbuf);
+		if (r == -ENMFILES)
+			return 0;
+		else if (r) {
+			__set_errno (-r);
+			return 0;
+		}
+		else {
+			dd->d_ino = dbuf.ino;
+			dd->d_off++;
+			dd->d_namlen = (short)strlen(dbuf.name);
+			strcpy(dd->d_name, dbuf.name);
+
+			/* if file system is case insensitive, transform name to lowercase */
+			if (d->status == _NO_CASE)
+				strlwr(dd->d_name);
+
+			return dd;
+		}
+	}
+
     /* ordinary TOS search, using Fsnext. Note that the first time through,
      * Fsfirst has already provided valid data for us; for subsequent
      * searches, we need Fsnext.

@@ -63,14 +63,10 @@
 #define PRECISE_TIMING 1
 
 // ExtFS is supported
-#define SUPPORTS_EXTFS 0	// todo: enable
+#define SUPPORTS_EXTFS 1
 
 // mon is not supported
 #undef ENABLE_MON
-
-#ifndef ssize_t
-typedef signed long ssize_t;
-#endif
 
 // Data types
 typedef unsigned char uint8;

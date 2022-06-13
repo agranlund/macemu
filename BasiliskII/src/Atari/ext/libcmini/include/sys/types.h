@@ -41,7 +41,7 @@ typedef __uint32_t __gid_t;	/* Type of group identifications.  */
 typedef __uint32_t __ino_t;	/* Type of file serial numbers.  */
 typedef __uint32_t __mode_t;	/* Type of file attribute bitmasks.  */
 typedef __uint32_t __nlink_t;   /* Type of file link counts.  */
-typedef signed long int __ssize_t;	/* Type of a byte count, or error.  */
+typedef __int32_t __ssize_t;	/* Type of a byte count, or error.  */
 typedef __int32_t __off_t;	/* Type of file sizes and offsets.  */
 typedef __int32_t __clock_t;	/* Type of CPU usage counts.  */
 typedef __int32_t __time_t;

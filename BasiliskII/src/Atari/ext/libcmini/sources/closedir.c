@@ -28,11 +28,26 @@ int closedir(DIR *dirp)
 
     /* The GNU libc closedir returns gracefully if a NULL pointer is
        passed.  We follow here.  */
-    if (dirp == NULL)
-    {
+    if (dirp == NULL) {
         __set_errno(EBADF);
         return -1;
     }
+    /*
+	if (dirp->magic != __DIR_MAGIC) {
+		__set_errno (EFAULT);
+		return -1;
+	}
+    */
+
+  	if (dirp->handle != 0xff000000L)
+		r = Dclosedir(dirp->handle);
+	else
+		r = 0;
+        
+	if (r == -ENOSYS) {
+		/* hmm, something went wrong, just ignore it. */
+		r = 0;
+	}  
 
     free(dirp->dirname);
     free(dirp);

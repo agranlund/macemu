@@ -26,7 +26,7 @@ LDFLAGS = $(LIBCMINI_LIB) -l:$(GEMLIB) -lgcc -lstdc++ -lcmini -lgcc
 SYMFLAGS = -Wl,--traditional-format
 
 PARCP			= ./tools/parcp421/apple/parcp
-PARCP_DST		= H:\
+PARCP_DST		= u:/h
 
 
 # target parameter
@@ -104,6 +104,7 @@ SRCS = blank.S \
     ../cdrom.cpp ../scsi.cpp scsi_atari.cpp ../video.cpp video_atari.cpp \
     ../audio.cpp audio_atari.cpp  \
     ../user_strings.cpp user_strings_atari.cpp \
+	extfs_atari.cpp posix_emu.cpp ../extfs.cpp \
 	debug_atari.cpp input_atari.cpp zeropage.cpp 68030_pmmu.cpp \
 	asm_support.S asm_support030.S asm_support040.S asm_support060.S \
 	ext/68040_pmmu.S \

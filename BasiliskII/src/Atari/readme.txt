@@ -14,7 +14,7 @@
   derkom, Badwolf, SWE/YesCREW, Odd Skancke, Miro Kropáček,
   and everyone else who has helped testing this.
  
-  Version: 220606
+  Version: 220611
 
 --------------------
 License

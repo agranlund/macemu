@@ -37,8 +37,6 @@ DIR *opendir(const char *uname)
     char *p;
     char *name;
 
-    strcpy(namebuf, uname);
-    name = namebuf;
     
     d = malloc(sizeof(DIR));
     if (!d)
@@ -46,6 +44,36 @@ DIR *opendir(const char *uname)
         __set_errno(ENOMEM);
         return NULL;
     }
+
+	//d->magic = __DIR_MAGIC;
+	d->dirname = NULL;
+
+    name = namebuf;
+	strcpy(name, uname);
+	  
+	r = Dopendir(name, 0);
+	if (r != -ENOSYS) {
+		if ( (r & 0xff000000L) == 0xff000000L ) {
+			if ((r == -ENOTDIR) /*&& (_enoent(name))*/)
+				r = -ENOENT;
+			free(d);
+			__set_errno (-r);
+			return NULL;
+		}
+		else {
+			d->handle = r;
+			d->buf.d_off = 0;
+
+			/* test if the file system is case sensitive */
+			r = Dpathconf(name, 6);
+			if (r == 1 || r == -ENOSYS)
+				d->status = _NO_CASE;
+			else
+				d->status = 0;
+			return d;
+		}
+	}
+
 
     d->handle = 0xff000000L;  /* indicate that the handle is invalid */
 

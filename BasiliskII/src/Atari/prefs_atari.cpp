@@ -29,6 +29,7 @@
 // Platform-specific preferences items
 prefs_desc platform_prefs_items[] = {
 	{"_disk",			TYPE_STRING,	true,  "Disabled disk"},
+	{"_extfs",			TYPE_STRING,	true,  "Disabled extfs"},
 	{"diskdevmode",		TYPE_INT32,		false, "Device access mode"},
 	{"diskcache", 		TYPE_BOOLEAN, 	false, "Disk image cache"},
 	{"diskcachesize",	TYPE_INT32, 	false, "Disk image cache size"},
