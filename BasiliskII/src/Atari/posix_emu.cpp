@@ -100,6 +100,7 @@ int my_rename( const char *old_path, const char *new_path )
 {
 	FILE_ACCESS_START();
 	int result = rename(old_path, new_path);
+	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("rename [%s] [%s] = %d\n", old_path, new_path, result));
 	return result;
@@ -127,6 +128,7 @@ int my_mkdir( const char *path, int mode )
 {
 	FILE_ACCESS_START();
 	int result = Dcreate(path);
+	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("mkdir [%s] = %d\n", path, result));
 	return result;
@@ -136,6 +138,7 @@ int my_remove( const char *path )
 {
 	FILE_ACCESS_START();
 	int result = remove(path);
+	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("remove [%s] = %d\n", path, result));
 	return result;
@@ -143,13 +146,22 @@ int my_remove( const char *path )
 
 int my_creat( const char *path, int mode )
 {
-	return my_open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	D(bug("my_creat\n"));
+	int result = my_open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	if (result >= 0)
+	{
+		FILE_ACCESS_START();
+		Fsync(result);
+		FILE_ACCESS_DONE();
+	}
+	return result;
 }
 
 int my_chsize( int fd, unsigned int sz )
 {
 	FILE_ACCESS_START();
 	int result = Fcntl (fd, &sz, FTRUNCATE);
+	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("chsize %d , %d = %d\n", fd, sz, result));
 	return result;
@@ -159,6 +171,7 @@ int my_close( int fd )
 {
 	FILE_ACCESS_START();
 	int result = close(fd);
+	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("close %d = %d\n", fd, result));
 	return result;
@@ -219,43 +232,29 @@ int my_closedir(DIR *d)
 	return result;
 }
 
-/*
-static FILETIME get_file_time(time_t time) {
-	FILETIME ft;
-	unsigned long long result = 11644473600LL;
-	result += time;
-	result *= 10000000LL;
-	ft.dwHighDateTime = (result >> 32);
-	ft.dwLowDateTime = (result & 0xFFFFFFFF);
-	return ft;
-}
-*/
 int my_utime( const char *path, struct utimbuf * my_times )
 {
-	//FILE_ACCESS_START();
-	// todo
-	//FILE_ACCESS_DONE();
-
-	my_times->actime = 0;
-	my_times->modtime = 0;
-	return 0;
-/*
-	// todo
-	return -1;
-	auto tpath = tstr(path);
-	LPCTSTR p = MRP(tpath.get());
-	HANDLE f = CreateFile(p, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (f != INVALID_HANDLE_VALUE) {
-		FILETIME crTime = get_file_time(my_times->actime);
-		FILETIME modTime = get_file_time(my_times->modtime);
-		SetFileTime(f, &crTime, NULL, &modTime);
-		CloseHandle(f);
-		return 0;
+	FILE_ACCESS_START();
+	unsigned long modtime;
+	unsigned long* dtime;
+	if (my_times) {
+		dtime = (unsigned long*) &my_times->modtime;
+	} else {
+		modtime = ((long) Tgettime() << 16) | (Tgetdate() & 0xFFFF);
+		dtime = &modtime;
 	}
-	return -1;
-	*/
+
+	int16 fh = open(path, O_WRONLY | O_CREAT);
+	if (fh < 0) {
+		FILE_ACCESS_DONE();
+		D(bug("my_utime - failed to open %s (%d)\n", path, fh));
+		return -1;
+	}
+
+	int result = Fdatime(dtime, fh, 1);
+	close(fh);
+	FILE_ACCESS_DONE();
+
+	D(bug("my_utime %s = %d\n", path, result));
+	return result;
 }
-
-
-
-

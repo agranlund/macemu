@@ -122,6 +122,8 @@ static void make_helper_path(const char *src, char *dest, const char *add, bool 
 	// Add last component
 	if (!only_dir)
 		strncat(dest, last_part, MAX_PATH_LENGTH-1);
+
+	D(bug("extf_Atari: make_helper_path [%s]<-[%s][%s]\n", dest, src, add));
 }
 
 static int create_helper_dir(const char *path, const char *add)
@@ -165,14 +167,16 @@ static int open_helper(const char *path, const char *add, int flag)
 
 static int open_finf(const char *path, int flag)
 {
-	D(bug("extfs_atari: open_finf [%s]\n", path));
-	return open_helper(path, HOST_FINF_DIR HOST_DIRSEP_STR, flag);
+	int result = open_helper(path, HOST_FINF_DIR HOST_DIRSEP_STR, flag);
+	D(bug("extfs_atari: open_finf [%s] (%x) = %d\n", path, flag, result));
+	return result;
 }
 
 static int open_rsrc(const char *path, int flag)
 {
-	D(bug("extfs_atari: open_rsrc [%s]\n", path));
-	return open_helper(path, HOST_RSRC_DIR HOST_DIRSEP_STR, flag);
+	int result = open_helper(path, HOST_RSRC_DIR HOST_DIRSEP_STR, flag);
+	D(bug("extfs_atari: open_rsrc [%s] (%x) = %d\n", path, flag, result));
+	return result;
 }
 
 
@@ -264,8 +268,10 @@ void get_finfo(const char *path, uint32 finfo, uint32 fxinfo, bool is_dir)
 		if (fxinfo)
 			actual += read(fd, Mac2HostAddr(fxinfo), SIZEOF_FXInfo);
 		close(fd);
-		if (actual >= SIZEOF_FInfo)
+		if (actual >= SIZEOF_FInfo) {
+			D(bug("extfs_atari: get_finfo. actual = %d / %d\n", actual, SIZEOF_FInfo));
 			return;
+		}
 	}
 
 	// No Finder info file, translate file name extension to MacOS type/creator
@@ -294,19 +300,22 @@ void set_finfo(const char *path, uint32 finfo, uint32 fxinfo, bool is_dir)
 	times.modtime = MacTimeToTime(ReadMacInt32(finfo - ioFlFndrInfo + ioFlMdDat));
 
 	if (utime(path, &times) < 0) {
-		//D(bug("utime failed on %s, error %d\n", path, GetLastError()));
+		D(bug("extfs_atari: set_finfo - utime failed\n"));
 	}
 
 	// Open Finder info file
 	int fd = open_finf(path, O_RDWR);
-	if (fd < 0)
+	if (fd < 0) {
+		D(bug("extfs_atari: set_finfo fail\n"));
 		return;
+	}
 
 	// Write file
 	write(fd, Mac2HostAddr(finfo), SIZEOF_FInfo);
 	if (fxinfo)
 		write(fd, Mac2HostAddr(fxinfo), SIZEOF_FXInfo);
 	close(fd);
+	D(bug("extfs_atari: set_finfo ok\n"));
 }
 
 
@@ -320,8 +329,10 @@ uint32 get_rfork_size(const char *path)
 
 	// Open resource file
 	int fd = open_rsrc(path, O_RDONLY);
-	if (fd < 0)
+	if (fd < 0) {
+		D(bug("extfs_atari: get_rfork_size - open_rsrc faied\n"));
 		return 0;
+	}
 
 	// Get size
 	off_t size = lseek(fd, 0, SEEK_END);
@@ -352,8 +363,9 @@ void close_rfork(const char *path, int fd)
 
 ssize_t extfs_read(int fd, void *buffer, size_t length)
 {
-	D(bug("extfs_atari: extfs_read [%d]\n", fd));
-	return read(fd, buffer, length);
+	ssize_t result = read(fd, buffer, length);
+	D(bug("extfs_atari: extfs_read [%d] = %d\n", fd, (int32) result));
+	return result;
 }
 
 
@@ -364,8 +376,9 @@ ssize_t extfs_read(int fd, void *buffer, size_t length)
 
 ssize_t extfs_write(int fd, void *buffer, size_t length)
 {
-	D(bug("extfs_atari: extfs_write [%d]\n", fd));
-	return write(fd, buffer, length);
+	ssize_t result = write(fd, buffer, length);
+	D(bug("extfs_atari: extfs_write [%d] = %d\n", fd, (int32) result));
+	return result;
 }
 
 
@@ -398,8 +411,10 @@ bool extfs_remove(const char *path)
 			add_path_component(helper_path, HOST_RSRC_DIR);
 			rmdir(helper_path);
 			return rmdir(path) == 0;
-		} else
+		} else {
+			D(bug("extfs_atari: extfs_remove failed\n"));
 			return false;
+		}
 	}
 	return true;
 }
@@ -426,7 +441,8 @@ bool extfs_rename(const char *old_path, const char *new_path)
 	rename(old_helper_path, new_helper_path);
 
 	// Now rename file
-	return rename(old_path, new_path) == 0;
+	bool result = rename(old_path, new_path) == 0;
+	return result;
 }
 
 
