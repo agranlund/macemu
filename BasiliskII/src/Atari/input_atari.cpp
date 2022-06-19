@@ -238,6 +238,7 @@ extern "C" void VecAciaC()
 void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
 {
     log("InitInput %d, %d\n", resx, resy);
+    bool setpos = false;
     if (!input_inited)
     {
         // mouse prefs
@@ -262,6 +263,9 @@ void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
 
         // no joystick
         ikbd_write(0x1A);
+
+        // set initial mouse position
+        setpos = true;
     }
 
     mouse_max_x = resx - 1;
@@ -288,14 +292,18 @@ void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
     {
         mouse_old.mx = PRES_TO_VRES(16);
         mouse_old.my = PRES_TO_VRES(16);
+        setpos = true;
     }
-    ikbd_write(0x0E);
-    ikbd_write(0x00);
-    ikbd_write(mouse_old.mx >> 8);
-    ikbd_write(mouse_old.mx & 0xFF);
-    ikbd_write(mouse_old.my >> 8);
-    ikbd_write(mouse_old.my & 0xFF);
-
+    
+    if (setpos)
+    {
+        ikbd_write(0x0E);
+        ikbd_write(0x00);
+        ikbd_write(mouse_old.mx >> 8);
+        ikbd_write(mouse_old.mx & 0xFF);
+        ikbd_write(mouse_old.my >> 8);
+        ikbd_write(mouse_old.my & 0xFF);
+    }
     input_inited = true;
 }
 
@@ -541,4 +549,16 @@ void RequestInput()
         mouse_requested = true;
         ikbd_write(0x0D);
     }
+}
+
+
+bool GetKeyStatus(uint8 key)
+{
+    return keys[key];
+}
+
+void GetMouse(int16& x, int16& y)
+{
+    x = VRES_TO_PRES(mouse.mx);
+    y = VRES_TO_PRES(mouse.my);
 }

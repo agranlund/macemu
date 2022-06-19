@@ -35,4 +35,8 @@ void RestoreInput();
 void UpdateInput();
 void RequestInput();
 
+bool GetKeyStatus(uint8 key);
+void GetMouse(int16& x, int16& y);
+
+
 #endif // ATARI_INPUT_H

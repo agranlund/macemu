@@ -196,6 +196,7 @@ public:
 protected:
 	virtual void UpdatePalette(uint8* colors, uint16 count);	// update palette
 	virtual void UpdateScreen();								// update screen
+	virtual void SetupScaling();								// lowres scaling
 
 	bool init_ok;										// Initialization succeeded
 	ScreenDesc screen;									// Atari screen descriptor
@@ -226,11 +227,15 @@ protected:
 	uint8* blitSrc;
 	uint8* blitDst;
 	uint32*	pageTable;
+	uint16* pageTableCopy;
 	uint16 pageSize;
 	uint16 pageShift;
 	uint32* compareBuffer;
 	uint16 hashSize;
 	bool lowRes;
+	bool scaled;
+	int16 lowResOffX;
+	int16 lowResOffY;
 	uint8* lowResOffs[480];
 
 	bool ChangeShifterRez(int32 bpp);
@@ -554,9 +559,10 @@ bool AtariScreenInfo(int32 mode, bool& native, uint32& mem)
 	{
 		if (w < 640) w = 640;
 		if (h < 480) h = 480;
-		mem = w * h * 2;		// 16bpp mac framebuffer
-		mem += (mem / 32);		// compare buffer
-		mem += 256 * 1024;		// alignment, padding, pagetables, etc..
+		mem = w * h * 2;					// 16bpp mac framebuffer
+		mem += (mem / 32);					// compare buffer
+		mem += 8 * (((w * h) + 256) / 256);	// pagetable x2
+		mem += 256 * 1024;					// alignment, padding, pagetables, etc..
 	}
 
 	return (native || emu);
@@ -681,6 +687,7 @@ void AtariScreenUpdate()
 	}
 }
 
+
 //-------------------------------------------------------------
 //
 // Monitor interface
@@ -766,6 +773,9 @@ VideoDriver::VideoDriver()
 	, compareBuffer(NULL)
 	, hashSize(0)
 	, lowRes(false)
+	, scaled(true)
+	, lowResOffX(0)
+	, lowResOffY(0)
 {
 	supportEmulatedModes = PrefsFindBool("video_emu");
 }
@@ -901,6 +911,9 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				if ((screen.pf == MODE_SHIFTER_4) || (screen.pf == MODE_SHIFTER_8))
 				{
 					lowRes = true;
+					scaled = true;
+					lowResOffX = 160;
+					lowResOffY = (screen.height == 200) ? 0 : 0;
 					shouldUpdateVdiPalette = false;
 					AddMode(640, 480, 0x80, 640, VDEPTH_8BIT);
 				}
@@ -962,7 +975,8 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 
 		const uint32 screenBufSize = ((((largestMode.y * largestMode.bytes_per_row) + alignMask) & ~alignMask) + (alignSize << 1));
 		const uint32 compareBufferSize = (screenBufSize / 32) << 2;
-		const uint32 totalSize = alignSize + screenBufSize + alignSize + compareBufferSize + alignSize;
+		const uint32 pageTableCopySize = 2 * ((screenBufSize + 256) / 256);
+		const uint32 totalSize = alignSize + screenBufSize + alignSize + compareBufferSize + alignSize + pageTableCopySize;
 
 		log(" Allocating %d kb for emulation buffers\n", totalSize / 1024);
 
@@ -1026,6 +1040,8 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				FlushATC030();
 				FlushCache030();
 			}
+			pageTableCopy = (uint16*) (((uint8*)compareBuffer) + compareBufferSize + alignSize);
+			log(" pageTableCopy:  %08x\n", pageTableCopy);
 		}
 
 		// ignore compare buffer when in slow ram
@@ -1140,9 +1156,9 @@ bool VideoDriver::Setup()
 						case 4:
 						{
 							if (HostCPUType >= 6)
-								blitFunc = lowRes ? c2p1x1_4_from_8_060_halfx : c2p1x1_4_from_8_060;
+								blitFunc = scaled ? c2p1x1_4_from_8_060_halfx : c2p1x1_4_from_8_060;
 							else
-								blitFunc = lowRes ? c2p1x1_4_from_8_halfx : c2p1x1_4_from_8;
+								blitFunc = scaled ? c2p1x1_4_from_8_halfx : c2p1x1_4_from_8;
 
 							macPaletteDirty = 256;
 						}
@@ -1150,9 +1166,9 @@ bool VideoDriver::Setup()
 						case 8:
 						{
 							if (HostCPUType >= 6)
-								blitFunc = lowRes ? c2p1x1_8_from_8_060_halfx : c2p1x1_8_from_8_060;
+								blitFunc = scaled ? c2p1x1_8_from_8_060_halfx : c2p1x1_8_from_8_060;
 							else
-								blitFunc = lowRes ? c2p1x1_8_from_8_halfx : c2p1x1_8_from_8;
+								blitFunc = scaled ? c2p1x1_8_from_8_halfx : c2p1x1_8_from_8;
 						}
 						break;
 						case 16:
@@ -1253,16 +1269,7 @@ bool VideoDriver::Setup()
 			blitDst += ((screen.height - mode.y) >> 1) * screen.bytesPerLine;
 
 		// scale table
-		if (lowRes)
-		{
-			uint32 offs = 0;
-			uint32 step = (mode.y << 8) / screen.height;
-			for (uint16 i=0; i<480; i++)
-			{
-				lowResOffs[i] = blitSrc + ((offs >> 8) * mode.bytes_per_row);
-				offs += step;
-			}
-		}
+		SetupScaling();
 	}
 
 	SetZeroPage(zp);
@@ -1293,6 +1300,68 @@ bool VideoDriver::Setup()
 	}
 
 	return true;
+}
+
+void VideoDriver::SetupScaling()
+{
+	if (lowRes)
+	{
+		uint16 msx = 1 << 8;
+		uint16 msy = 1 << 8;
+		const video_mode& mode = monitor->get_current_mode();
+		if (scaled)
+		{
+			uint32 offs = 0;
+			const uint32 bytes_per_row = mode.bytes_per_row;
+			const uint32 step = (mode.y << 8) / screen.height;
+			for (uint16 i=0; i<480; i++)
+			{
+				lowResOffs[i] = blitSrc + ((offs >> 8) * bytes_per_row);
+				offs += step;
+			}
+
+			if (blitFunc == c2p1x1_4_from_8)
+				blitFunc = c2p1x1_4_from_8_halfx;
+			else if (blitFunc == c2p1x1_8_from_8)
+				blitFunc = c2p1x1_8_from_8_halfx;
+			else if (blitFunc == c2p1x1_4_from_8_060)
+				blitFunc = c2p1x1_4_from_8_060_halfx;
+			else if (blitFunc == c2p1x1_8_from_8_060)
+				blitFunc = c2p1x1_8_from_8_060_halfx;
+
+			msx = (mode.x << 8) / screen.width;
+			msy = (mode.y << 8) / screen.height;
+		}
+		else
+		{
+			uint32 offs = 0;
+			const uint32 bytes_per_row = mode.bytes_per_row;
+			const uint32 bytes_per_pixel = bytes_per_row / mode.x;
+			const uint8* baseptr = blitSrc + (lowResOffX * bytes_per_pixel) + (lowResOffY * bytes_per_row);
+			uint32 step = (1 << 8);
+			for (uint16 i=0; i<screen.height; i++)
+			{
+				lowResOffs[i] = baseptr + ((offs >> 8) * bytes_per_row);
+				offs += step;
+			}
+
+			if (blitFunc == c2p1x1_4_from_8_halfx)
+				blitFunc = c2p1x1_4_from_8;
+			else if (blitFunc == c2p1x1_8_from_8_halfx)
+				blitFunc = c2p1x1_8_from_8;
+			else if (blitFunc == c2p1x1_4_from_8_060_halfx)
+				blitFunc = c2p1x1_4_from_8_060;
+			else if (blitFunc == c2p1x1_8_from_8_060_halfx)
+				blitFunc = c2p1x1_8_from_8_060;
+		}
+
+	#if ENABLE_VIDEODEBUG
+		if ((videoDebug & DBGFLAG_NO_INPUT) == 0)
+	#endif
+		{
+			InitInput(mode.x, mode.y, msx, msy);
+		}
+	}
 }
 
 void VideoDriver::GrayPage()
@@ -1355,6 +1424,61 @@ void VideoDriver::Update()
 		}
 
 		UpdateScreen();
+
+		if (lowRes)
+		{
+			static bool pressed = false;
+			bool key = GetKeyStatus(0x61);	// undo key
+			key |= GetKeyStatus(0x52);		// temp because I can't find the UNDO key in Hatari...
+			bool dosetup = false;
+			if (key != pressed)
+			{
+				pressed = key;
+				if (pressed)
+				{
+					scaled = !scaled;
+					dosetup = true;
+				}
+			}
+
+			if (!scaled)
+			{
+				int16 mx = 0;
+				int16 my = 0;
+				int16 xoff = lowResOffX;
+				int16 yoff = lowResOffY;
+				GetMouse(mx, my);
+
+				if (mx < 320)
+					xoff = 0;
+				else
+					xoff = 320;
+
+				if (screen.height == 200) {
+					if (my < 200)
+						yoff = 0;
+					else if ((lowResOffY == 200) && (my > 400))
+						yoff = 280;
+					else if ((lowResOffY == 280) && (my >= 280))
+						yoff = 280;
+					else
+						yoff = 200;
+				}
+
+				if ((lowResOffX != xoff) || (lowResOffY != yoff))
+				{
+					lowResOffY = yoff;
+					lowResOffX = xoff;
+					dosetup = true;
+				}
+				
+			}
+
+			if (dosetup) {
+				SetupScaling();
+				fullRedraw = true;
+			}
+		}
 	}
 	// native
 	else if (macPaletteDirty && shouldDelayPaletteUpdate)
@@ -1394,57 +1518,65 @@ void VideoDriver::UpdateScreen()
 	const uint16 minNumDstPixelsPerC2P = 16;
 	const uint16 remainBytes = (macScreenSize - (pageCount << pageShift)) & ~(minNumDstPixelsPerC2P-1);
 
-	if (pageTable && !fullRedraw)
+	uint16* pageTablePtr = NULL;
+	if (pageTable && pageTableCopy && !fullRedraw)
 	{
+		uint16 sr = DisableInterrupts();
 		FlushATC();
 	#if ENABLE_VIDEODEBUG
 		if (videoDebug & DBGFLAG_CACHE_FLUSH1)
 			FlushCache();
 	#endif
+		uint32* pageSrc = pageTable;
+		uint16* pageDst = pageTableCopy;
+		uint16 count = remainBytes ? pageCount + 1 : pageCount;
+		while(count)
+		{
+			uint32 desc = *pageSrc;
+			uint32 flag = desc & mmuModifiedFlag;
+			*pageDst++ = flag;
+			*pageSrc++ = desc & ~flag;
+			count--;
+		}
+		SetSR(sr);
+		pageTablePtr = pageTableCopy;
 	}
 
 	if (lowRes)
 	{
-		if (fullRedraw || (pageTable == 0))
+		uint16 srcBytesPerRow = scaled ? mode.bytes_per_row : (mode.bytes_per_row >> 1);
+
+		if (fullRedraw || (pageTablePtr == 0))
 		{
 			fullRedraw = false;
 			for (uint16 y=0; y<screen.height; y++)
 			{
-				blitFunc(dst, lowResOffs[y], mode.bytes_per_row, softPalette);
+				blitFunc(dst, lowResOffs[y], srcBytesPerRow, softPalette);
 				dst += screen.bytesPerLine;
 			}
 		}
 		else
 		{
 			const uint32 dstInc = screen.bytesPerLine;
-			uint16 pagesPerLine = (mode.bytes_per_row >> pageShift) + 1;
-			if (pagesPerLine < 2)
-				pagesPerLine = 2;
-
 			for (uint16 y=0; y<screen.height; y++)
 			{
 				uint8* src = lowResOffs[y];
 				uint16 page = (src - blitSrc) >> pageShift;
-				uint16 lastpage = ((src + mode.bytes_per_row) - blitSrc) >> pageShift;
+				uint16 lastpage = ((src + srcBytesPerRow) - blitSrc) >> pageShift;
 				uint32 desc = 0;
 				while (page <= lastpage)
 				{
-					desc |= pageTable[page];
+					desc |= pageTablePtr[page];
 					page++;
 				}
 				if (desc & mmuModifiedFlag)
-					blitFunc(dst, src, mode.bytes_per_row, softPalette);
+					blitFunc(dst, src, srcBytesPerRow, softPalette);
 			#if DEBUG_MMU
 				else
 					memset(dst, 0x00, dstInc);
 			#endif
 				dst += dstInc;
 			}
-
-			// clear modified bits
-			uint16 count = remainBytes ? pageCount + 1 : pageCount;
-			for (uint16 i=0; i<count; i++)
-				pageTable[i] &= ~mmuModifiedFlag;
 		}
 	}
 	else
@@ -1455,7 +1587,7 @@ void VideoDriver::UpdateScreen()
 			fullRedraw = false;
 			blitFunc(dst, src, macScreenSize, softPalette);
 		}
-		else if ((pageTable == NULL) || (pageSize == 0))
+		else if ((pageTablePtr == NULL) || (pageSize == 0))
 		{
 			// no mmu acceleration
 			if ((compareBuffer == NULL) || (hashSize < 32))
@@ -1498,20 +1630,16 @@ void VideoDriver::UpdateScreen()
 		else
 		{
 			// mmu acceleration
-			uint32* page = pageTable;
-			const uint32* lastPage = pageTable + pageCount;
+			uint16* page = pageTablePtr;
+			const uint16* lastPage = pageTablePtr + pageCount;
 			const uint32 pageSizeDst = ((uint32(pageSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
 			if ((hashSize == 0) || (compareBuffer == NULL))
 			{
 				// no compare acceleration
 				while (page < lastPage)
 				{
-					uint32 desc = *page;
-					if (desc & mmuModifiedFlag)
-					{
-						*page = (desc & ~mmuModifiedFlag);
+					if (*page & mmuModifiedFlag)
 						blitFunc(dst, src, pageSize, softPalette);
-					}
 				#if DEBUG_MMU
 					else
 						memset(dst, 0, pageSizeDst);
@@ -1530,8 +1658,7 @@ void VideoDriver::UpdateScreen()
 
 				while (page < lastPage)
 				{
-					uint32 desc = *page;
-					if ((desc & mmuModifiedFlag) == 0)
+					if (*page & mmuModifiedFlag)
 					{
 					#if DEBUG_MMU
 						memset(dst, 0x00, pageSizeDst);
@@ -1542,7 +1669,6 @@ void VideoDriver::UpdateScreen()
 					}
 					else
 					{
-						*page = (desc & ~mmuModifiedFlag);
 						uint16 count = hashCount;
 						while (count)
 						{
@@ -1573,19 +1699,13 @@ void VideoDriver::UpdateScreen()
 			}
 
 			// remaining bytes
-			if (remainBytes)
-			{
-				uint32 desc = *page;
-				if (desc & mmuModifiedFlag)
-				{
-					*page = (desc & ~mmuModifiedFlag);
-					blitFunc(dst, src, remainBytes, softPalette);
-				}
-			}
+			if (remainBytes && (*page & mmuModifiedFlag))
+				blitFunc(dst, src, remainBytes, softPalette);
 		}
 	}
 
-	if (pageTable && !fullRedraw)
+	/*
+	if (PageTable && !fullRedraw)
 	{
 		FlushATC();
 #if ENABLE_VIDEODEBUG
@@ -1593,7 +1713,7 @@ void VideoDriver::UpdateScreen()
 			FlushCache();
 #endif
 	}
-
+	*/
 }
 
 
