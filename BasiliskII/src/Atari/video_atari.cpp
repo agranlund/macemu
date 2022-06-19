@@ -1306,13 +1306,11 @@ void VideoDriver::SetupScaling()
 {
 	if (lowRes)
 	{
-		uint16 msx = 1 << 8;
-		uint16 msy = 1 << 8;
+		uint32 offs = 0;
 		const video_mode& mode = monitor->get_current_mode();
+		const uint32 bytes_per_row = mode.bytes_per_row;
 		if (scaled)
 		{
-			uint32 offs = 0;
-			const uint32 bytes_per_row = mode.bytes_per_row;
 			const uint32 step = (mode.y << 8) / screen.height;
 			for (uint16 i=0; i<480; i++)
 			{
@@ -1328,14 +1326,9 @@ void VideoDriver::SetupScaling()
 				blitFunc = c2p1x1_4_from_8_060_halfx;
 			else if (blitFunc == c2p1x1_8_from_8_060)
 				blitFunc = c2p1x1_8_from_8_060_halfx;
-
-			msx = (mode.x << 8) / screen.width;
-			msy = (mode.y << 8) / screen.height;
 		}
 		else
 		{
-			uint32 offs = 0;
-			const uint32 bytes_per_row = mode.bytes_per_row;
 			const uint32 bytes_per_pixel = bytes_per_row / mode.x;
 			const uint8* baseptr = blitSrc + (lowResOffX * bytes_per_pixel) + (lowResOffY * bytes_per_row);
 			uint32 step = (1 << 8);
@@ -1353,13 +1346,6 @@ void VideoDriver::SetupScaling()
 				blitFunc = c2p1x1_4_from_8_060;
 			else if (blitFunc == c2p1x1_8_from_8_060_halfx)
 				blitFunc = c2p1x1_8_from_8_060;
-		}
-
-	#if ENABLE_VIDEODEBUG
-		if ((videoDebug & DBGFLAG_NO_INPUT) == 0)
-	#endif
-		{
-			InitInput(mode.x, mode.y, msx, msy);
 		}
 	}
 }
@@ -1430,17 +1416,22 @@ void VideoDriver::Update()
 			static bool pressed = false;
 			bool key = GetKeyStatus(0x61);	// undo key
 			key |= GetKeyStatus(0x52);		// temp because I can't find the UNDO key in Hatari...
-			bool dosetup = false;
+			bool setupScaling = false;
+			bool setupInput = false;
+
+			// toggle zoom mode
 			if (key != pressed)
 			{
 				pressed = key;
 				if (pressed)
 				{
 					scaled = !scaled;
-					dosetup = true;
+					setupScaling = true;
+					setupInput = true;
 				}
 			}
 
+			// virtual screen in zoomed mode
 			if (!scaled)
 			{
 				int16 mx = 0;
@@ -1469,14 +1460,26 @@ void VideoDriver::Update()
 				{
 					lowResOffY = yoff;
 					lowResOffX = xoff;
-					dosetup = true;
+					setupScaling = true;
 				}
 				
 			}
 
-			if (dosetup) {
+			if (setupScaling) {
 				SetupScaling();
 				fullRedraw = true;
+			}
+
+			if (setupInput) {
+			#if ENABLE_VIDEODEBUG
+				if ((videoDebug & DBGFLAG_NO_INPUT) == 0)
+			#endif
+				{
+					const video_mode& mode = monitor->get_current_mode();
+					const uint16 msx = scaled ? ((mode.x << 8) / screen.width) : (1 << 8);
+					const uint16 msy = scaled ? ((mode.y << 8) / screen.height) : (1 << 8);
+					InitInput(mode.x, mode.y, msx, msy);
+				}
 			}
 		}
 	}
