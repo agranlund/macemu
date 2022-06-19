@@ -87,6 +87,11 @@ typedef struct timeval tm_time_t;
 #define htons(x) (x)
 #define htonl(x) (x)
 
+extern char* strlwr(char* str);
+extern char* strupr(char* str);
+
+extern "C" int Getcookie(long, long*);
+
 
 #define FlushCodeCache(a,b)     FlushCache()
 

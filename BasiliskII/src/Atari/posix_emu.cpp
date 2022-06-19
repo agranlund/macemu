@@ -31,10 +31,30 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <ext.h>
-#include <dirent.h>
+
+#ifdef LIBCMINI
+	#include "errno.h"
+	#include <ext.h>
+	#include <dirent.h>
+	#define	__S_IFMT				0170000
+	#define	__S_IFDIR				0040000	
+	#define	__S_ISTYPE(mode, mask)	(((mode) & __S_IFMT) == (mask))
+	#define	S_ISDIR(mode)	 		__S_ISTYPE((mode), __S_IFDIR)
+#else
+	#include <errno.h>
+	#include <fcntl.h>
+	#include <stdarg.h>
+	#include <sys/dirent.h>
+	#include <sys/stat.h>	
+#endif
+
+
 #include "mint/dcntl.h"
 #include "mint/mintbind.h"
+
+#ifdef MINTLIB
+	#define dta _dta
+#endif
 
 #define DEBUG 0
 #include "debug.h"
@@ -53,8 +73,12 @@ extern bool isMagic;
 
 bool extfs_supported = false;
 
+#define EMPTYBUF_SIZE (1 * 1024)
+static char emptybuf[EMPTYBUF_SIZE];
+
 void init_posix_emu(void)
 {
+	memset(emptybuf, 0, EMPTYBUF_SIZE);
 	if (isMint || isMagic)
 		extfs_supported = true;
 }
@@ -62,6 +86,8 @@ void init_posix_emu(void)
 void final_posix_emu(void)
 {
 }
+
+extern "C" {
 
 int my_stat( const char *path, struct my_stat *st )
 {
@@ -108,26 +134,48 @@ int my_rename( const char *old_path, const char *new_path )
 
 int my_access( const char *path, int mode )
 {
+#ifdef LIBCMINI
+	// todo: missing in libcmini
+	int result = 0;
 	if (mode == F_OK)
 	{
 		// exist check
 		FILE_ACCESS_START();
-		ffblk dta;
-		int result = findfirst(path, &dta, 0xFF);
-		D(bug("access F_OK [%s] = %d\n", path, result));
+		struct stat st;
+		if (stat(path, &st) == 0) {
+			result = 0;
+		} else {
+			result = -1;
+		}
 		FILE_ACCESS_DONE();
+		D(bug("access F_OK [%s] = %d\n", path, result));
 		return result;
 	}
-
 	// permission check: R_OK / W_OK / X_OK
-	errno = 0;
-	return 0;
+	return result;
+#else
+	FILE_ACCESS_START();
+	int result = access(path, mode);
+	FILE_ACCESS_DONE();
+	return result;
+#endif
 }
 
 int my_mkdir( const char *path, int mode )
 {
 	FILE_ACCESS_START();
-	int result = Dcreate(path);
+	int result;
+#ifdef LIBCMINI
+	// todo: missing in libcmini
+	struct stat st;
+	if ((stat(path, &st) == 0) && S_ISDIR(st.st_mode)) {
+		result = 0;
+	} else {
+		result = Dcreate(path);
+	}
+#else
+	result = mkdir(path, mode);
+#endif
 	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("mkdir [%s] = %d\n", path, result));
@@ -137,7 +185,22 @@ int my_mkdir( const char *path, int mode )
 int my_remove( const char *path )
 {
 	FILE_ACCESS_START();
+#ifdef LIBCMINI
+	// todo: broken in libcmini
+	int result = 0;
+	struct stat st;
+	if (path && *path && (stat(path, &st) == 0)) {
+		if (S_ISDIR(st.st_mode)) {
+			result = Ddelete(path);
+		} else {
+			result = Fdelete(path);
+		}
+		if ((result == ENOTDIR) || (result == ENOENT))
+			result = 0;
+	}
+#else
 	int result = remove(path);
+#endif
 	Sync();
 	FILE_ACCESS_DONE();
 	D(bug("remove [%s] = %d\n", path, result));
@@ -157,13 +220,35 @@ int my_creat( const char *path, int mode )
 	return result;
 }
 
-int my_chsize( int fd, unsigned int sz )
+int my_ftruncate( int fd, unsigned int sz )
 {
+	int result = 0;
 	FILE_ACCESS_START();
-	int result = Fcntl (fd, &sz, FTRUNCATE);
-	Sync();
+	int32 pos = lseek(fd, 0, SEEK_CUR);
+	int32 size = lseek(fd, 0, SEEK_END);
+	int32 newsize = (int32) sz;
+	if (newsize > size)
+	{
+		int32 cnt = newsize - size;
+		while(cnt >= EMPTYBUF_SIZE) {
+			write(fd, emptybuf, EMPTYBUF_SIZE);
+			cnt -= EMPTYBUF_SIZE;
+		}
+		if (cnt > 0) {
+			write(fd, emptybuf, cnt);
+		}
+		lseek(fd, pos, SEEK_SET);
+		result = 0;
+	}
+	else
+	{
+		lseek(fd, pos, SEEK_SET);
+		if (newsize < size) {
+			result = Fcntl(fd, &newsize, FTRUNCATE);
+		}
+	}
 	FILE_ACCESS_DONE();
-	D(bug("chsize %d , %d = %d\n", fd, sz, result));
+	D(bug("ftruncate (%d), %d -> %d = %d\n", fd, newsize, size, result));
 	return result;
 }
 
@@ -258,3 +343,5 @@ int my_utime( const char *path, struct utimbuf * my_times )
 	D(bug("my_utime %s = %d\n", path, result));
 	return result;
 }
+
+};

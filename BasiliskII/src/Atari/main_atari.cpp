@@ -70,6 +70,34 @@
 #define QUIT_ON_RESET			1			// just quit until we've figure out why reset is crashing
 
 
+char *strlwr(char *str)
+{
+	char *p = str;
+	if (p) {
+		while (*str) {
+			char c = *str;
+			if (c >= 'A' && c <= 'Z')
+				*str = c + 'a' - 'A';
+			++str;
+		}
+	}
+	return p;
+}
+
+char *strupr(char *str)
+{
+	char *p = str;
+	if (p) {
+		while (*str) {
+			char c = *str;
+			if (c >= 'a' && c <= 'z')
+				*str = c + 'A' - 'a';
+			++str;
+		}
+	}
+	return p;
+}
+
 // Constants
 char RSC_FILE_NAME[] = "BASILISK.RSC";
 static const char ROM_FILE_NAME[] = "ROM";
@@ -620,8 +648,8 @@ void start_super()
 
 int main()
 {
-	//Supexec(&start_super);
-	Supexec(&super_main);
+	Supexec(&start_super);
+	//Supexec(&super_main);
 	return 0;
 }
 

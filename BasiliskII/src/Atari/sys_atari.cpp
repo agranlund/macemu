@@ -26,6 +26,7 @@
 #include "sys.h"
 #include "zeropage.h"
 #include "mint/cookie.h"
+#include "mint/sysbind.h"
 
 #define DEBUG 0
 #include "debug.h"

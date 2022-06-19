@@ -30,6 +30,8 @@
 #include "mint/cookie.h"
 #include "version.h"
 
+#include <string.h>
+
 #define DEBUG 0
 #include "debug.h"
 
@@ -352,11 +354,11 @@ bool PrefsEditor(void)
 	char* romString = verString + 32;
 	char* aboutString = romString + 32;
 
-	snprintf(cpuString, 6, "680%1d0", CPUType);
+	sprintf(cpuString, "680%1d0", CPUType);
 	formMain[CTL_CPU].ob_spec.tedinfo->te_ptext = cpuString;
 	formMain[CTL_CPU].ob_spec.tedinfo->te_txtlen = strlen(cpuString);
 
-	snprintf(verString, 32, " %s", __DATE__);
+	sprintf(verString, " %.32s", __DATE__);
 	formMain[CTL_VERSION].ob_spec.tedinfo->te_ptext = verString;
 	formMain[CTL_VERSION].ob_spec.tedinfo->te_txtlen = strlen(verString);
 
@@ -528,8 +530,8 @@ bool PrefsEditor(void)
 						{
 							case MENU_ABOUT:
 							{
-								char strver[32];
-								snprintf(strver, 32, GetString(STR_ABOUT_TEXT1), VERSION_MAJOR, VERSION_MINOR);
+								char strver[64];
+								sprintf(strver, GetString(STR_ABOUT_TEXT1), VERSION_MAJOR, VERSION_MINOR);
 								sprintf(aboutString, "[0][%s|%s  | ][Ok]", strver, GetString(STR_ABOUT_TEXT2));
 								form_alert(1, aboutString);
 							}
@@ -760,6 +762,8 @@ bool PrefsEditor(void)
 		}
 	}
 
+	D(bug("going to exit now..\n"));
+
 	if (formMain[CTL_FPU_ON].ob_state != 0x8)
 		PrefsReplaceBool("fpu", (formMain[CTL_FPU_ON].ob_state & 1) ? true : false);
 	PrefsReplaceBool("nosound", (formMain[CTL_SOUND_OFF].ob_state & 1) ? true : false);
@@ -770,8 +774,10 @@ bool PrefsEditor(void)
 	D(bug("Saving prefs\n"));
 	SavePrefs();
 	D(bug("Cleanup\n"));
-	for (uint16 i=0; windows[i] != NULL; i++)
+	for (uint16 i=0; windows[i] != NULL; i++) {
+		D(bug(" Destroy window %i [%08x : %08x]\n", i, windows[i], windows[i]->handle));
 		windows[i]->Destroy();
+	}
 	log("Exiting Prefs editor\n");
 	Mfree(tempdata);
 	return (done > 0);

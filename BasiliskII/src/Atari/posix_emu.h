@@ -23,40 +23,56 @@
 #ifndef _POSIX_EMU_H_
 #define _POSIX_EMU_H_
 
-/*
-#include <fcntl.h>
-#include <errno.h>
-#include <io.h>
-#include <direct.h>
-#include <sys/stat.h>
-*/
-//#include <stdio.h>
-//#include <unistd.h>
-//#include <ext.h>
-//#include <errno.h>
-//#include "extfs.h"
-#include <dirent.h>
-
 void init_posix_emu(void);
 void final_posix_emu(void);
 
 // access() mode: exists?
 #ifndef F_OK
-#define F_OK 0
+  #define F_OK 0
 #endif
 // access() mode: can do r/w?
 #ifndef W_OK
-#define W_OK 6
+  #define W_OK 6
 #endif
 
-#define EPERM       38
-#define EBUSY       2
-#define ENOTEMPTY   83
-#define ENOSPC      94
-#define EROFS       13
-#define EMFILE      35
-#define EIO         90
+#ifdef LIBCMINI
 
+  // libcmini is using different defines than unix/mintlib
+  #ifdef O_CREAT
+    #undef O_CREAT
+    #define O_CREAT  0x20
+  #endif
+  #ifdef O_TRUNC
+    #undef O_TRUNC
+    #define O_TRUNC  0x40
+  #endif
+  #ifdef O_EXCL
+    #undef O_EXCL
+    #define O_EXCL  0x80
+  #endif
+
+  #ifndef EPERM
+    #define EPERM       38
+  #endif
+  #ifndef EBUSY
+    #define EBUSY       2
+  #endif
+  #ifndef ENOTEMPTY
+    #define ENOTEMPTY   83
+  #endif
+  #ifndef ENOSPC
+    #define ENOSPC      94
+  #endif
+  #ifndef EROFS
+    #define EROFS       13
+  #endif
+  #ifndef EMFILE
+    #define EMFILE      35
+  #endif
+  #ifndef EIO
+    #define EIO         90
+  #endif
+#endif
 
 struct utimbuf
 {
@@ -64,6 +80,9 @@ struct utimbuf
 	time_t modtime;     // modification time
 };
 
+typedef struct __dirstream DIR;
+
+extern "C" {
 int my_stat( const char *, struct my_stat * );
 int my_fstat( int, struct my_stat * );
 int my_open( const char *, int, ... );
@@ -77,13 +96,14 @@ int my_close( int fd );
 long my_lseek( int fd, long, int);
 int my_read( int fd, void *, unsigned int);
 int my_write( int fd, const void *, unsigned int);
-int my_chsize( int fd, unsigned int size );
+int my_ftruncate( int fd, unsigned int size );
 int my_locking( int fd, int mode, long nbytes );
 int my_utime( const char *path, struct utimbuf * );
 
 DIR* my_opendir( const char* path);
 struct dirent* my_readdir(DIR *d);
 int my_closedir(DIR *d);
+};
 
 
 
@@ -107,7 +127,7 @@ int my_closedir(DIR *d);
 # define lseek my_lseek
 # define read my_read
 # define write my_write
-# define ftruncate my_chsize
+# define ftruncate my_ftruncate
 # define locking my_locking
 # define utime my_utime
 

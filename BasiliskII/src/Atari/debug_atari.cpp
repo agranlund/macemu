@@ -23,6 +23,7 @@
 #include "zeropage.h"
 #include "prefs.h"
 #include "mint/mintbind.h"
+#include <stdarg.h>
 
 #define DEBUG 0
 #include "debug.h"
@@ -136,7 +137,7 @@ void aprintf_do(const char* buf, uint32 len)
 void aprintf(const char *fmt, ...)
 {
 #if DEBUG_ATARI_ENABLED
-    static char buf[256];
+    static char buf[1024];
     if (loggingMode != LOGGING_MODE_OFF)
     {
         uint16 sr = DisableInterrupts();
@@ -154,7 +155,7 @@ void aprintf(const char *fmt, ...)
             // format
             va_list va;
             va_start(va, fmt);
-            vsnprintf(buf, 253, fmt, va);
+            vsprintf(buf, fmt, va);
             va_end(va);
             uint32 len = strlen(buf);
             if (buf[0] <= 0)

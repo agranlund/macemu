@@ -30,9 +30,11 @@
 #include "sysdeps.h"
 #include "extfs.h"
 #include "extfs_defs.h"
-#include "posix_emu.h"
+#include "stdio.h"
+#include "errno.h"
+#include "fcntl.h"
 
-#include <errno.h>
+#include "posix_emu.h"
 
 #define DEBUG 0
 #include "debug.h"
@@ -44,7 +46,6 @@
 #define HOST_DIRSEP_STR_ALT  	"/"
 #define HOST_FINF_DIR			"._fi"
 #define HOST_RSRC_DIR			"._rf"
-
 
 
 // Default Finder flags
@@ -113,8 +114,11 @@ static void make_helper_path(const char *src, char *dest, const char *add, bool 
 		last_part = src;
 
 	// Copy everything before
-	strncpy(dest, src, last_part-src);
-	dest[last_part-src] = 0;
+	int32 left = last_part - src;
+	if (left > 0) {
+		strncpy(dest, src, left);
+	}
+	dest[left] = 0;
 
 	// Add additional component
 	strncat(dest, add, MAX_PATH_LENGTH-1);
@@ -128,7 +132,7 @@ static void make_helper_path(const char *src, char *dest, const char *add, bool 
 
 static int create_helper_dir(const char *path, const char *add)
 {
-	char helper_dir[MAX_PATH_LENGTH];
+	static char helper_dir[MAX_PATH_LENGTH];
 	make_helper_path(path, helper_dir, add, true);
 	char* last_char_ptr = &helper_dir[strlen(helper_dir) - 1];
 	if ((*last_char_ptr == HOST_DIRSEP_CHAR) || (*last_char_ptr == HOST_DIRSEP_CHAR_ALT))
@@ -139,10 +143,10 @@ static int create_helper_dir(const char *path, const char *add)
 
 static int open_helper(const char *path, const char *add, int flag)
 {
-	char helper_path[MAX_PATH_LENGTH];
+	static char helper_path[MAX_PATH_LENGTH];
 	make_helper_path(path, helper_path, add);
 
-	D(bug("extfs_atari: open_helper [%s][%s]\n", path, helper_path));
+	D(bug("extfs_atari: open_helper [%s][%s] (%x)\n", path, helper_path, flag));
 
 	switch (flag & (O_RDONLY | O_WRONLY | O_RDWR)) {
 	case O_WRONLY:
@@ -392,7 +396,7 @@ bool extfs_remove(const char *path)
 	D(bug("extfs_atari: extfs_remove [%s]\n", path));
 
 	// Remove helpers first, don't complain if this fails
-	char helper_path[MAX_PATH_LENGTH];
+	static char helper_path[MAX_PATH_LENGTH];
 	make_helper_path(path, helper_path, HOST_FINF_DIR HOST_DIRSEP_STR, false);
 	remove(helper_path);
 	make_helper_path(path, helper_path, HOST_RSRC_DIR HOST_DIRSEP_STR, false);
@@ -430,7 +434,8 @@ bool extfs_rename(const char *old_path, const char *new_path)
 	D(bug("extfs_atari: extfs_rename [%s] [%s]\n", old_path, new_path));
 
 	// Rename helpers first, don't complain if this fails
-	char old_helper_path[MAX_PATH_LENGTH], new_helper_path[MAX_PATH_LENGTH];
+	static char old_helper_path[MAX_PATH_LENGTH];
+	static char new_helper_path[MAX_PATH_LENGTH];
 	make_helper_path(old_path, old_helper_path, HOST_FINF_DIR HOST_DIRSEP_STR, false);
 	make_helper_path(new_path, new_helper_path, HOST_FINF_DIR HOST_DIRSEP_STR, false);
 	create_helper_dir(new_path, HOST_FINF_DIR HOST_DIRSEP_STR);

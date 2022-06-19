@@ -7,27 +7,37 @@ CC = ~/gccfilter -c m68k-atari-mint-gcc
 NATIVE_GCC = ~/gccfilter -c gcc
 STRIPX = tools/stripx
 
+#LIBC_TYPE		= libcmini
+LIBC_TYPE		= mintlib
+
 LIBCMINI_DIR	= ext/libcmini
+LIBCMINI_CRT	= $(LIBCMINI_DIR)/build/minicrt0.o
 GEMLIB_DIR		= ext/gemlib
 GEMLIB			= $(GEMLIB_DIR)/libgem.a
 
-LIBCMINI_INC	= -I$(LIBCMINI_DIR)/include
-LIBCMINI_LIB	= -L$(LIBCMINI_DIR)/build/m68020-60
-LIBCMINI_CRT	= $(LIBCMINI_DIR)/build/minicrt0.o
-#LIBCMINI_CRT	= $(LIBCMINI_DIR)/build/crt0.o
-LIBCMINI_CFL	= -ffast-math -nostdlib 
-LIBCMINI_LFL	= #-nodefaultlibs -nostdlib -nostartfiles -lcmini
-# -lgcc -lstdc++ -lcmini -lgcc
+ifeq ($(LIBC_TYPE),libcmini)
+#libcmini
+LIBC_INC	= -I$(LIBCMINI_DIR)/include
+LIBC_LIB	= -L$(LIBCMINI_DIR)/build/m68020-60
+LIBC_CRT	= $(LIBCMINI_CRT)
+LIBC_CFL	= -ffast-math -nodefaultlibs -nostdlib -DLIBCMINI
+LIBC_LFL	= -lgcc -lstdc++ -lcmini -lgcc
+else
+#mintlib
+LIBC_INC	= 
+LIBC_LIB	= 
+LIBC_CRT	= 
+LIBC_CFL	= -ffast-math -DMINTLIB
+LIBC_LFL	= -lgcc -lstdc++ -m68000
+endif
 
-INCLUDE = $(LIBCMINI_INC) -I$(GEMLIB_DIR) -I../include -I../native_cpu -I. -nodefaultlibs -nostdlib
-LDFLAGS = $(LIBCMINI_LIB) -l:$(GEMLIB) -lgcc -lstdc++ -lcmini -lgcc
-
+INCLUDE = $(LIBC_INC) -I$(GEMLIB_DIR) -I../include -I../native_cpu -I.
+LDFLAGS = $(LIBC_LIB) -l:$(GEMLIB) $(LIBC_LFL)
 
 SYMFLAGS = -Wl,--traditional-format
 
 PARCP			= ./tools/parcp421/apple/parcp
 PARCP_DST		= u:/h
-
 
 # target parameter
 ifeq ($(target),)
@@ -50,26 +60,17 @@ STRIP = $(STRIPX) -v -f $(BIN)
 endif
 
 
-# cpu parameter
-CPU = $(cpu)
-ifeq ($(CPU),68030)
-	CPU_MACH = -m68030
-	CPU_DEF = -DCPU=030
-	CPU_SUFFIX = 030
-else ifeq ($(CPU),68040)
-	CPU_MACH = -m68040
-	CPU_DEF = -DCPU=040
-	CPU_SUFFIX = 040
-else ifeq ($(CPU),68060)
-	CPU_MACH = -m68060
-	CPU_DEF = -DCPU=060
-	CPU_SUFFIX = 060
-else
+#ifeq ($(LIBC_TYPE),libcmini)
 	CPU = 68020-60
 	CPU_MACH = -m68020-60
 	CPU_DEF = -DCPU=020
-	CPU_SUFFIX =
-endif
+	CPU_SUFFIX =	
+#else
+#	CPU = 68030
+#	CPU_MACH = -m68030
+#	CPU_DEF = -DCPU=030
+#	CPU_SUFFIX = 030
+#endif
 
 
 OUT_APP = basilisk.prg
@@ -85,14 +86,12 @@ BIN = $(OBJ_DIR)/$(OUT_APP)
 DEFS = -DATARI $(CPU_DEF) $(TARGET_DEF)
 
 CXXFLAGS = -std=c++0x \
-	$(LIBCMINI_CFL) \
-	$(DEFS) \
-	$(SYMFLAGS) \
+	$(LIBC_CFL) $(DEFS) $(SYMFLAGS) \
 	-fpermissive -fomit-frame-pointer -fno-exceptions \
 	-Wall -Wno-multichar \
 	-Wl,-Map,mapfile \
 
-SFLAGS = $(DEFS)
+SFLAGS = $(LIBC_CFL) $(DEFS)
 
 SRCS = blank.S \
 	../main.cpp main_atari.cpp ../prefs.cpp ../prefs_items.cpp \
@@ -146,8 +145,8 @@ SRC_PATHS += $(sort $(foreach file, $(SRCS), $(dir $(file))))
 VPATH :=
 VPATH += $(addprefix :, $(subst  ,:, $(filter-out $($(subst, :, ,$(VPATH))), $(SRC_PATHS))))
 
-$(BIN): $(OBJ_DIR) $(DISASM) $(STRIPX) $(LIBCMINI_CRT) $(GEMLIB) $(OBJS)
-	$(CC) $(CXXFLAGS) $(LIBCMINI_CRT) $(OBJS) $(LDFLAGS) -o $(BIN)
+$(BIN): $(OBJ_DIR) $(DISASM) $(STRIPX) $(LIBC_CRT) $(GEMLIB) $(OBJS)
+	$(CC) $(CXXFLAGS) $(LIBC_CRT) $(OBJS) $(LDFLAGS) -o $(BIN)
 	$(STRIP)
 
 $(LIBCMINI_CRT):
