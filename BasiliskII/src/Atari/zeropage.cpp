@@ -31,9 +31,9 @@
 extern void pmmu_68030_init(void);
 extern "C" void setup_68040_pmmu(void);
 
-
 #define CACR_OVERRIDE       1
 #define CACR_RESPECT_MAC    0
+#define ENABLE_BRANCH_CACHE 0
 
 ZeroPageState ZPState[3];
 volatile uint16 currentZeroPage = ZEROPAGE_OLD;
@@ -62,6 +62,38 @@ extern bool isMint;
 extern uint16 tosVersion;
 extern uint32 ROMSize;
 
+
+/*
+68060
+11.1.2.3 CONTEXT SWITCH INTERRUPT HANDLERS. Context switch interrupt handlers
+that use the same virtual address to map into multiple physical address locations must flush
+the branch cache via the MOVEC to CACR instruction. The reason for this is that the branch
+cache is a logical cache and not a physical cache. For systems that transparently translate
+logical addresses to physical addresses, the branch cache need not be flushed.
+
+The branch cache must be cleared by the operating system on all context switches (using
+the MOVEC to CACR instruction), because it is virtually-mapped.
+
+The branch cache is automatically cleared by the hardware as part of any cache invalidate
+(CINV) or any cache push and invalidate (CPUSH) instruction operating on the instruction
+cache.
+
+// CACR:  31  30  29  28  27  26  24 23  22	  21   20      16 15  14  13  12	      0
+//        EDC NAD ESB DPI FOC 0 0 0  EBC CABC CUBC 0 0 0 0 0  EIC NAI FIC 0000000000000
+
+    EDC = Enable data cache
+    NAD = No allocate Mode (data cache)
+    ESB = Enable store buffer
+    DPI = Disable CPUSH invalidation
+    FOC = 1/2 cache operation enable (data cache)
+    EBC = Enable branch cache
+    CABC = Clear all entries in branch cache
+    CUBC = Clear user entries in branch cache
+    EIC = Enable instruction cache
+    NAI = No allocate mode (instruction cache)
+    FIC = 1/2 cache operation enable (instruction cache)
+*/
+
 extern "C" uint16 SetZeroPage(uint16 page)
 {
     uint16 sr = DisableInterrupts();
@@ -78,9 +110,23 @@ extern "C" uint16 SetZeroPage(uint16 page)
         if (currentZeroPage == ZEROPAGE_MAC) {
             ZPState[ZEROPAGE_MAC].cacr = GetCACR();
         }
+
+        uint32 cacr = ZPState[page].cacr;
+        #if ENABLE_BRANCH_CACHE
+        cacr |= 0x00400000; // flush branch cache
+        #endif
+        SetCACR(cacr);
+    #else
+        SetCACR(ZPState[page].cacr);
     #endif
-    SetCACR(ZPState[page].cacr);
 #else
+    #if ENABLE_BRANCH_CACHE
+    if (HostCPUType >= 6) {
+        uint32 cacr = GetCACR060();
+        cacr |= 0x00400000;
+        SetCACR060(cacr);
+    }
+    #endif
     FlushCache();
 #endif
     uint16 prevZeroPage = currentZeroPage;
@@ -230,6 +276,20 @@ bool InitZeroPage()
     GetMMU(&ZPState[ZEROPAGE_OLD].mmu);
     memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
     memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+
+    if (HostCPUType >= 6)
+    {
+        uint32 cacr = GetCACR060();
+        cacr &= 0x80008000;     // mask data + instr cache only
+        cacr |= 0x00400000;     // flush branch cache
+        SetCACR060(cacr);
+        #if !ENABLE_BRANCH_CACHE
+            cacr &= 0x80008000; // no need to flush disabled branch cache on context switch
+        #endif        
+        ZPState[ZEROPAGE_TOS].cacr = cacr;
+        ZPState[ZEROPAGE_MAC].cacr = cacr;
+    }
+
     return true;
 }
 
@@ -248,9 +308,9 @@ bool SetupZeroPage()
     ZPState[ZEROPAGE_TOS].vbr = tosVbr;
     ZPState[ZEROPAGE_MAC].vbr = macVbr;
 
-    log(" oldVbr = 0x%08x\n", ZPState[ZEROPAGE_OLD].vbr);
-    log(" tosVbr = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr);
-    log(" macVbr = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr);
+    log(" oldVbr  = 0x%08x\n", ZPState[ZEROPAGE_OLD].vbr);
+    log(" tosVbr  = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr);
+    log(" macVbr  = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr);
 
     if ((HostCPUType >= 4) && (ROMSize < (1024 * 1024)))
     {
@@ -266,6 +326,10 @@ bool SetupZeroPage()
     #if CACR_RESPECT_MAC
         ZPState[ZEROPAGE_MAC].cacr = 0;                 // Mac sets up the cache
     #else
+        #if ENABLE_BRANCH_CACHE
+        if (HostCPUType >= 6)
+            ZPState[ZEROPAGE_MAC].cacr = 0x80408000;     // enable data+instr cache, flush branch cache
+        #endif
         if (HostCPUType >= 4)
             ZPState[ZEROPAGE_MAC].cacr = 0x80008000;     // data+instr cache
         else
@@ -273,9 +337,16 @@ bool SetupZeroPage()
     #endif
 #endif
 
+    if (HostCPUType >= 6)
+    {
+        log(" oldPcr  = 0x%08x\n", oldPCR);
+        log(" newPcr  = 0x%08x\n", GetPCR060());
+    }
+
     log(" oldCacr = 0x%08x\n", ZPState[ZEROPAGE_OLD].cacr);
     log(" tosCacr = 0x%08x\n", ZPState[ZEROPAGE_TOS].cacr);
     log(" macCacr = 0x%08x\n", ZPState[ZEROPAGE_MAC].cacr);
+
 
     //---------------------------------------------------------------------
     //  Vectors

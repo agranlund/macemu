@@ -74,6 +74,7 @@ extern "C" {
 extern void BootMacintosh(uint8* stack);
 extern void ExecuteTosInterrupt(uint16 vec);
 
+// Vectors
 extern void VecRts();
 extern void VecRte();
 extern void VecNoHbl();
@@ -87,25 +88,7 @@ extern void VecTosIrq();
 extern void VecMacException();
 extern void VecMacFpuException();
 
-extern void FlushCache030();
-extern void FlushATC030();
-extern void InitMMU030();
-extern void GetMMU030(MMURegs030* r);
-extern void SetMMU030(MMURegs030* r);
-extern uint32 GetCACR030();
-extern void SetCACR030(uint32 r);
-
-extern void FlushCache040();
-extern void FlushATC040();
-extern void InitMMU040();
-extern void GetMMU040(MMURegs040* r);
-extern void SetMMU040(MMURegs040* r);
-extern uint32 GetCACR040();
-extern void SetCACR040(uint32 r);
-
-extern void Setup060(void);
-
-// Motorola 68060 support package
+// Motorola 68060 support vectors
 extern void Vec060_isp_unimp();
 extern void Vec060_isp_cas();
 extern void Vec060_isp_cas2();
@@ -124,10 +107,108 @@ extern void Vec060_fpsp_fline();
 extern void Vec060_fpsp_unsupp();
 extern void Vec060_fpsp_effadd();
 
+// 68030
+extern void FlushCache030();
+extern void FlushATC030();
+extern void InitMMU030();
+extern void GetMMU030(MMURegs030* r);
+extern void SetMMU030(MMURegs030* r);
+extern uint32 GetCACR030();
+extern void SetCACR030(uint32 r);
+
+// 68040
+extern void FlushCache040();
+extern void FlushATC040();
+extern void InitMMU040();
+extern void GetMMU040(MMURegs040* r);
+extern void SetMMU040(MMURegs040* r);
+extern uint32 GetCACR040();
+extern void SetCACR040(uint32 r);
+
+// 68060
+extern void FlushCache060();
+#define FlushATC060 FlushATC040
+#define InitMMU060 InitMMU040
+#define GetMMU060 GetMMU040
+#define SetMMU060 SetMMU040
+#define GetCACR060 GetCACR040
+extern void SetCACR060(uint32 r);
+extern void SetPCR060(uint32 r);
+extern uint32 GetPCR060();
+
+
+// CPU access
+typedef void (*flush_cache_func)();
+typedef void (*flush_atc_func)();
+typedef uint32 (*get_cacr_func)();
+typedef void (*set_cacr_func)(uint32 r);
+typedef void (*get_mmu_func)(MMURegs * r);
+typedef void (*set_mmu_func)(MMURegs * r);
+
+extern flush_cache_func FlushCache;
+extern flush_atc_func	FlushATC;
+extern set_cacr_func	SetCACR;
+extern get_cacr_func	GetCACR;
+extern get_mmu_func		GetMMU;
+extern set_mmu_func		SetMMU;
+extern uint32			oldPCR;
+
 #ifdef __cplusplus
 }
 #endif
 
+//------------------------------------------------------------------------------------------
+inline void InitCPU()
+{
+	if (HostCPUType < 4)
+	{
+		// 68030
+		FlushCache 		= FlushCache030;
+		FlushATC 		= FlushATC030;
+		SetCACR			= SetCACR030;
+		GetCACR			= GetCACR030;
+		GetMMU			= GetMMU030;
+		SetMMU			= SetMMU030;
+	}
+	else if (HostCPUType < 6)
+	{
+		// 68040
+		FlushCache 		= FlushCache040;
+		FlushATC 		= FlushATC040;
+		SetCACR			= SetCACR040;
+		GetCACR			= GetCACR040;
+		GetMMU			= GetMMU040;
+		SetMMU			= SetMMU040;
+	}
+	else
+	{
+		// 68060
+		FlushCache 		= FlushCache060;
+		FlushATC 		= FlushATC060;
+		SetCACR			= SetCACR060;
+		GetCACR			= GetCACR060;
+		GetMMU			= GetMMU060;
+		SetMMU			= SetMMU060;
+
+		oldPCR = GetPCR060();
+		// bit 0 = enable super scalar
+		// bit 1 = disable fpu
+		// bit 5 = disable super bypass (undocumented)
+		uint32 pcr = oldPCR;
+		pcr |= (1 << 5);
+		SetPCR060(pcr);
+	}
+
+	FlushCache();
+}
+
+inline void RestoreCPU()
+{
+	if (HostCPUType >= 6)
+	{
+		SetPCR060(oldPCR);
+	}
+}
 
 //------------------------------------------------------------------------------------------
 
@@ -168,47 +249,5 @@ inline void SetVBR(uint32* newVBR) {
 		"	movec  %0,vbr\n"    \
 		: : "r"(newVBR) : "cc");
 }
-
-
-//------------------------------------------------------------------------------------------
-inline uint32 GetCACR() {
-	if (HostCPUType >= 4)
-		return GetCACR040();
-	else
-		return GetCACR030();
-}
-
-inline void SetCACR(uint32 r) {
-	if (HostCPUType >= 4)
-		SetCACR040(r);
-	else
-		SetCACR030(r);
-}
-
-//------------------------------------------------------------------------------------------
-
-inline void SetMMU(MMURegs* regs) {
-	if (HostCPUType >= 4)
-		SetMMU040(&regs->m040);
-	else
-		SetMMU030(&regs->m030);
-}
-
-inline void GetMMU(MMURegs* regs) {
-	if (HostCPUType >= 4)
-		GetMMU040(&regs->m040);
-	else
-		GetMMU030(&regs->m030);
-}
-
-//------------------------------------------------------------------------------------------
-
-inline void FlushATC() {
-	if (HostCPUType >= 4)
-		FlushATC040();
-	else
-		FlushATC030();
-}
-
 
 #endif

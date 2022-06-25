@@ -106,7 +106,6 @@ void AddPlatformPrefsDefaults(void)
 	// remove common default prefs that aren't useful for us
 	PrefsRemoveItem("udptunnel");
 	PrefsRemoveItem("udpport");
-	PrefsRemoveItem("frameskip");
 	PrefsRemoveItem("displaycolordepth");
 	PrefsRemoveItem("noclipconversion");
 	PrefsRemoveItem("jit");
@@ -115,16 +114,29 @@ void AddPlatformPrefsDefaults(void)
 	PrefsRemoveItem("cpu");
 
 	// new defaults for atari
+	PrefsReplaceInt32("frameskip", 1);		// frameskip for emulated graphics
 	PrefsReplaceInt32("ramsize", 0);		// autodetect
 	PrefsReplaceInt32("modelid", 0);		// autodetect
 	PrefsReplaceBool("fpu", true);			// use fpu if available
 	PrefsReplaceBool("nosound", false);		// sound enabled
 	PrefsReplaceBool("nogui", false);		// gui enabled
 
-	PrefsAddInt32("sound_driver", 1);		// DMA sound
-	PrefsAddInt32("sound_freq", 22050);		// 22050hz by default
-	PrefsAddInt32("sound_channels", 1);		// mono
-	PrefsAddInt32("sound_bits", 8);			// 8bit
+	uint32 cookie = 0;
+	Getcookie('_SND', &cookie);
+	if (cookie & 2)
+	{
+		PrefsAddInt32("sound_driver", 1);		// DMA sound
+		PrefsAddInt32("sound_freq", 22050);		// 22050hz by default
+		PrefsAddInt32("sound_channels", 1);		// mono
+		PrefsAddInt32("sound_bits", 8);			// 8bit
+	}
+	else
+	{
+		PrefsAddInt32("sound_driver", 2);		// YM sound
+		PrefsAddInt32("sound_freq", 11025);		// 11025hz by default
+		PrefsAddInt32("sound_channels", 1);		// mono
+		PrefsAddInt32("sound_bits", 8);			// 8bit
+	}
 
 	PrefsAddString("logging", "file");		// log mode
 	PrefsAddBool("logging_full", false);	// log init only

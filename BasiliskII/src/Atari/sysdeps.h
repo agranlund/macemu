@@ -92,9 +92,6 @@ extern char* strupr(char* str);
 
 extern "C" int Getcookie(long, long*);
 
-
-#define FlushCodeCache(a,b)     FlushCache()
-
 #ifdef printf
 #undef printf
 #endif
@@ -106,14 +103,5 @@ extern "C" void aprintf(const char *fmt, ...);
 #define strdup astrdup
 extern "C" char* astrdup(const char* s);
 #endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-void FlushCache(void);
-#ifdef __cplusplus
-};
-#endif
-
 
 #endif

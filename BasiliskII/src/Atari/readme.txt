@@ -5,7 +5,6 @@
   Copyright (C) 1997-2008 Christian Bauer et al.
   http://basilisk.cebix.net/
 
-
   Atari port by by Anders Granlund
   http://www.happydaze.se
 
@@ -14,13 +13,23 @@
   derkom, Badwolf, SWE/YesCREW, Odd Skancke, Miro Kropáček,
   and everyone else who has helped testing this.
  
-  Version: 220611
+  Version: 220625
 
 --------------------
 License
 --------------------
 Basilisk II is available under the terms of the GNU General Public License.
-See the file "LICENSE.TXT" that is included in the distribution for details.
+See license.txt for details.
+
+
+--------------------
+Features
+--------------------
+- Native code execution with low emulation overhead
+- Native graphics on Graphics card or Atari mono.
+- Emulated graphics on most Atari screen modes
+- Sound through YM/DMA/LPT/Cartridge
+- Disk images, shared folder, direct hdd access
 
 
 --------------------
@@ -28,8 +37,8 @@ Requirements
 --------------------
 - Atari ST/STe/TT/Falcon
 - 68030 or better. MMU is required, FPU is optional.
-- 4MB+ RAM and a Hard drive.
-- Mono monitor, unless you have a graphics card
+- 4MB+ RAM minimum (8MB+ for non-native graphics)
+- A hard drive
 - A MacintoshII ROM dump
 
 
@@ -44,46 +53,51 @@ These are general recommendations, you may have better or worse luck
 using roms from other Macintosh models.
 
 (68030)
-If you are low on memory then these 512K roms appear to work also:
+If you are low on memory then these 512K roms may work:
 MacII-CI (requires an FPU)
 MacII-SI (works with or without FPU)
 
 (68040-60)
-I am unsure which Quadra rom is "best", try one from a 650/700/800/900.
-Some '030 roms may work but I recommend using a proper 68040 rom.
+I am unsure which Quadra rom is best, try one from a 650/700/800/900.
+Some 68030 roms may work but I recommend using a proper 68040 rom.
 
 
 --------------------
 Graphics
 --------------------
-
 Native:
-
   MacOS can render directly and without emulation to:
     - ST and TT mono resolutions
     - Graphics card with a Mac compatible display mode
       (256 color mode is the safest bet)
 
+Emulated:
+  BasiliskII will emulate graphics when the Atari display mode
+  is not directly compatible with MacOS.
+  This is *much* slower than native graphics.
 
-Emulation:
-  BasiliskII will emulate graphics when the screen mode is not
-  directly compatible. This is much slower than native graphics.
+  You need at least 8MB RAM to use emulated graphics.
 
-  Atari 4bit  -> Mac 4bit + 8bit(*)
-  Atari 8bit  -> Mac 8bit
-  Atari 16bit -> Mac 16bit + 8bit(*)
-  Other 16bit -> Mac 16bit
+  BasiliskII can translate the following display modes:
 
-  (*) These 8bit modes are even slower.
-      For best performance you absolutely want the Atari in 8bit mode too.
+   Atari 4bit  <-> Mac 4bit + 8bit(*)
+   Atari 8bit  <-> Mac 8bit
+   Atari 16bit <-> Mac 16bit + 8bit(*)
+   Other 16bit <-> Mac 16bit
 
-  Some special cases:
-    - ST-Low -> Mac 8bit 640x480 (scaled)
-    - TT-Low -> Mac 8bit 640x480 (scaled)
-    - Graphics card set to an incompatible 16bit mode will use emulation
+   (*) These 8bit modes are even slower.
+       You'll get the best performance when Atari and MacOS
+       bit depths are matching.
+     
+  Special cases:
+    - ST-Low and TT-Low will emulate a 640x480x256 color Mac display.
+      Press the UNDO key to toggle viewport zoom.
+
+    - A graphics card set to an incompatible 16bit mode will use emulation
       to correct the color channels.
-   
-
+      This is obviously a lot slower than native rendering but
+      colors will be correct.
+  
 
 --------------------
 Sound
@@ -113,27 +127,60 @@ A note on QuickTime:
 
 
 --------------------
+Performance help
+--------------------
+* Sound is quite expensive on Ataris that don't have DMA.
+  Try lowering the quality. You can do so in basilisk.inf
+  or from the Sound prefs in the MacOS control Panel.
+
+* Try an older version of MacOS with lower system requirements
+
+* Emulated graphics is very expensive.
+  You may want to experiment with different Atari screen modes
+  or use Mono (or a graphics card) which doesn't have
+  any emulation overhead.
+
+  Non-matching bit-depth are even more expensive.
+  For example, 8bit MacOS on 4bit Atari is much slower than
+  4bit MacOS on 4bit Atari (or even 8bit MacOS on 8bit Atari).
+  You can normally change MacOS mode from "Monitor" prefs
+  in the control panel.
+  
+  You can try with a higher frameskip option.
+
+  Emulated graphics is optimized for fastram and you're not
+  going to have a good experience if you only have ST-RAM.
+
+* Graphics card and 16bit
+  Most Atari graphics cards are not going to match the pixel format
+  that MacOS wants.
+  If this happens then emulation is going to kick in and it will
+  be slow. 8bit mode is generally a safer bet for graphics cards.
+
+* Disk image access is much faster in MiNT or MagiC compared
+  to when running plain TOS or EmuTOS.
+
+
+--------------------
 Configuring
 --------------------
+
 basilisk.inf contains some settings you may want to modify.
 At the very least to specify the rom file and to add one or
 more disks/cds to the Mac.
 
-logging <mode>
-  Enable debug logging. Mode can be "off", "file", "serial" or "screen".
-  File logging writes to the file basilisk.log
-  Serial logging outputs in 307200 baud, 8 bits, no parity, 1 stop bit.
-  Screen logging prints directly on the screen
+nogui <enable>
+  Set to true to disable the startup configuration GUI.
 
-rom <ROM file path>
+rom <filename>
   This item specifies the file name of the Mac ROM file to be used by
   Basilisk II. If no "rom" line is given, the ROM file has to be named
   "ROM" and put in the same directory as the Basilisk II executable.
 
 modelid <MacOS model ID>
   Specifies the Macintosh model ID that Basilisk II should report to MacOS.
-  The default is "5" which corresponds to a Mac IIci. If you want to run
-  MacOS 8, you have to set this to "14" (Quadra 900).
+  The default is "5" which corresponds to a Mac IIci.
+  If you want to run MacOS 8, you have to set this to "14" (Quadra 900).
 
 ramsize <bytes>
   Allocate "bytes" bytes of RAM for MacOS system and application memory.
@@ -142,18 +189,6 @@ ramsize <bytes>
 fpu <enable>
   Enable fpu if available
   0 = don't use fpu, 1 = use fpu if available
-  
-irqsafe <enable>
-  Debug option.
-  Setting this to true will limit which Mac interrupts can
-  happen while TOS is being accessed.
-  Will cause mouse/gfx/sound stutters during disk access.
-
-mouse_speed <speed>
-  Speed of Mac mouse cursor. Default is 8.
-
-nogui <enable>
-  Set to true to disable the startup configuration GUI.
 
 nosound <enable>
   Set to true to disable virtual Mac sound hardware.
@@ -162,9 +197,8 @@ sound_driver <driver>
   0=Silent, 1=DMA, 2=YM, 3=Covox, 4=MV16, 5=Replay8, 6=Replay8S, 7=Replay16
 
 sound_freq <hz>
-  Wanted playback frequency.
-  Does not have to be exact, you'll get the closest matching frequency
-  that is supported by the sound driver.
+  Wanted playback frequency. It does not have to be exact,
+  you'll get the closest matching frequency supported by the sound driver.
 
 sound_channels <number of channels>
   Number of channels (1 for mono, 2 for stereo)
@@ -174,14 +208,17 @@ sound_bits <bits per sample>
   Wanted bits per sample (8 or 16)
   Sound driver may choose another format if your setting is not supported.
 
+mouse_speed <speed>
+  Speed of Mac mouse cursor. Default is 8.
+
 video_emu <enable>
   Enable video emulation support
 
 video_mmu <enable>
   Enable video emulation MMU acceleration
 
-video_cmp <enable>
-  Enable video emulation compare buffer acceleration
+frameskip <value>
+  Frameskip when using emulated video.
 
 bootdrive <drive number>
   Specify MacOS drive number of boot volume. "0" (the default) means
@@ -201,8 +238,24 @@ cdrom <CD-ROM drive description>
   can be multiple "cdrom" lines in the preferences file.
   The format of "CD-ROM drive description" is the same as for "disk" lines.
 
+extfs <folder>
+  This item describes an Atari folder which should be shared to MacOS.
+  There can be only one shared folder.
+  This feature requires MiNT or MagiC and the folder should be on a
+  partition that has long filenames enabled.
+  The folder will be littered with many (hidden) files so I recommend
+  using a dedicated folder for this purpose rather than sharing
+  something like your home folder.
+
 diskcache <enable>
   Enable disk image cache
+
+diskdevmode <mode>
+  Enables direct hdd feature, default is 3
+    0 = disabled
+    1 = enabled in AHDI mode only
+    2 = enabled in XHDI mode only
+    3 = enabled in XHDI and AHDI mode (XHDI preferred)
 
 disk <volume description>
   This item describes one MacOS volume to be mounted by Basilisk II.
@@ -222,21 +275,14 @@ disk <volume description>
   Disk image
   ----------
   The easiest, and safest, is to use disk images stored on an Atari partition.
-  Disk images might be slow though, depending on TOS and driver.
+  Disk images can be very slow, depending on TOS and driver.
   They are generally quite ok in MiNT and MagiC, but slow in Atari TOS
   and extremely slow in EmuTOS.
-
-  MacOS does a lot of tiny reads for almost anything and filesystem latency,
-  rather than throughput, will make the whole experience quite slow.
-  With that being said, I still recommend using this method unless you've
-  backed up all your things and have a farily good understand of Atari
-  hard drives, partitions and drivers.
 
   The path can be absolute or relative.
   Example:
     "disk hdd0.dsk"
     "disk c:\basilisk\disks\hdd0.dsk"
-
 
 
   -----------------

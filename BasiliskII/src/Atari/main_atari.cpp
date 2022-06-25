@@ -200,23 +200,32 @@ void Start680x0()
 		RestoreDebug();
 
 	EmulationStarted = true;
+
+	log(" Setting timers\n");
 	timer_atari_set();
+
+	log(" Disabling interrupts\n");
 	DisableInterrupts();
+
+	log(" Setting zero page\n");
 	SetZeroPage(ZEROPAGE_MAC);
+
+	log(" Clearing zero page\n");
 	void* zeroMem = (void*)0x00000000;
 	memset(zeroMem, 0x00, 8*1024);
+
+	log(" Init timers\n");
 	InitTimers();
+
+	log(" Booting macintosh\n");
 	BootMacintosh(stack);
 }
 
-void FlushCache()
-{
-	if (HostCPUType >= 4)
-		FlushCache040();
-	else if (HostCPUType >= 2)
-		FlushCache030();
-}
 
+void FlushCodeCache(void *start, uint32 size)
+{
+	FlushCache();
+}
 
 bool app_init()
 {
@@ -303,7 +312,6 @@ int super_main()
 		tosVersion = oshdr->os_version;
 	}
 
-
 	// Read preferences
 	int argc = 0;
 	char** argv = 0;
@@ -327,7 +335,8 @@ int super_main()
 	if (PrefsFindInt32("modelid") <= 0)
 		PrefsReplaceInt32("modelid", CPUType >= 4 ? 14 : 5);
 
-	// Init zero page
+	// early low level init
+	InitCPU();
 	InitZeroPage();
 
 	// Show preferences editor
@@ -484,18 +493,17 @@ int super_main()
 	// Create area for Mac RAM and ROM (ROM must be higher in memory,
 	// so we allocate one big chunk and put the ROM at the top of it)
 
-	static const uint32 ramsizeMask = 0xffff0000;		// round to 64Kb
-	static const uint32 ramsizeMin = 512*1024L;			// minimum ram to start
-	//static const uint32 ramsizeMask = 0xfff00000;		// round to 1MB
-	//static const uint32 ramsizeMin = 1024*1024L;			// minimum ram to start
-	static const uint32 ramsizeMax = 512 * 1024 * 1024;	// maximum Mac ram
-
 	uint32 freeRam = Mxalloc(-1, 3);
 	uint32 freeRamST = Mxalloc(-1, 0);
 	uint32 freeRamTT = Mxalloc(-1, 1);
 	log("Free ST-RAM: %u\n", freeRamST);
 	log("Free TT-RAM: %u\n", freeRamTT);
 	log("Free Block:  %u\n", freeRam);
+
+	// round RAM size to 1MB increments unless we are very low on memory then go for 64KB
+	static const uint32 ramsizeMask = freeRam < (4 * 1024 * 1024) ? 0xffff0000 : 0xfff00000;
+	static const uint32 ramsizeMin = 512*1024L;			// minimum ram to start
+	static const uint32 ramsizeMax = 512 * 1024 * 1024;	// maximum Mac ram
 
 	RAMSize = PrefsFindInt32("ramsize");
 	if (RAMSize > 0 && RAMSize < (16 * 1024))
@@ -601,10 +609,6 @@ int super_main()
 		QuitEmulator();
 	}
 
-	// 68060 specific setup
-	if (HostCPUType == 6)
-		Setup060();
-
 	// Jump to ROM boot routine
 	// todo: save SP
 	EmulatedSR = 0x2700;
@@ -685,6 +689,8 @@ void QuitEmulator(void)
 	SysExit();
 	PrefsExit();
 	FlushCache();
+
+	RestoreCPU();
 
 	linea0();
 	linea9();
@@ -800,6 +806,7 @@ static inline void ClearInterruptFlag(uint32 flag)
 		: "=m"(InterruptFlags) : "g"(flag) : "d0", "cc", "memory");
 }
 
+int16 blockVideoInts = 0;
 int16 blockInts = 0;
 static inline void TriggerInterrupt(void)
 {
@@ -852,6 +859,7 @@ extern "C" uint16 VecMacExceptionC(trap_regs *r)
 	{
 		uint16 opcode = *(uint16*)(r->pc);
 	#ifndef NDEBUG
+	/*
 		if ((opcode & 0xff00) != 0x7100)
 		{
 			D(bug("Illegal Instruction %04x at %08lx\n", *(uint16 *)(r->pc), r->pc));
@@ -865,6 +873,7 @@ extern "C" uint16 VecMacExceptionC(trap_regs *r)
 				r->sr));
 			QuitEmulator();
 		}
+	*/		
 	#endif
 
 		//uint16 sr = EmulatedSR;
@@ -1101,6 +1110,9 @@ extern "C" void VecTimer2C(uint16 oldsr)
 	// Mac 60hz interrupt
 	if (doFakeVbl)
 	{
+		if (blockVideoInts)
+			doFakeVbl = false;
+
 		// Mac 1hz interrupt
 		cnt1 += trg60;
 		if (cnt1 >= 60)
@@ -1134,7 +1146,8 @@ extern "C" void VecTimer2C(uint16 oldsr)
 		}
 
 		// Mac ADB interrupt
-		UpdateInput();
+		if (doFakeVbl)
+			UpdateInput();
 
 		// audio
 		irq |= INTFLAG_AUDIO;

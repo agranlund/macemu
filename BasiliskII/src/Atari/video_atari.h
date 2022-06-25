@@ -41,7 +41,7 @@ struct ScreenDesc
 bool QueryScreen(ScreenDesc& scr);
 bool AtariScreenInfo(int32 mode, bool& native, uint32& mem);
 void AtariScreenUpdate();
-
+void AtariVideoScaleKeyPressed();
 
 // standard hardware
 #define HW_SHIFTER_ST			0

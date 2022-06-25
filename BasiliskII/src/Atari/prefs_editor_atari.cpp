@@ -284,12 +284,9 @@ static void update_video()
 
 	bool emu = PrefsFindBool("video_emu");
 	bool mmu = PrefsFindBool("video_mmu");
-	bool cmp = PrefsFindBool("video_cmp");
 	menu_icheck(menu, MENU_GFX_EMUDISABLE, emu ? 0 : 1);
 	menu_icheck(menu, MENU_GFX_MMUACCEL, (/*emu &&*/ mmu) ? 1 : 0);
-	menu_icheck(menu, MENU_GFX_CMPACCEL, (/*emu &&*/ cmp) ? 1 : 0);
 	menu_ienable(menu, MENU_GFX_MMUACCEL, emu ? 1 : 0);
-	menu_ienable(menu, MENU_GFX_CMPACCEL, emu ? 1 : 0);
 }
 
 static const char* update_logmode(int16 mode)
@@ -600,13 +597,6 @@ bool PrefsEditor(void)
 							{
 								bool en = !PrefsFindBool("video_mmu");
 								PrefsReplaceBool("video_mmu", en);
-								update_video();
-							}
-							break;
-							case MENU_GFX_CMPACCEL:
-							{
-								bool en = !PrefsFindBool("video_cmp");
-								PrefsReplaceBool("video_cmp", en);
 								update_video();
 							}
 							break;

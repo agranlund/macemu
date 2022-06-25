@@ -10,13 +10,8 @@ logging file
 nocdrom false
 nosound false
 nogui false
-sound_driver 1
-sound_freq 22050
-sound_channels 1
-sound_bits 8
 video_emu true
 video_mmu true
-video_cmp false
 diskdevmode 3
 diskcache true
 bootdrive 0

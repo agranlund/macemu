@@ -61,25 +61,27 @@ static const char* videoHwStrings[] =
 	"SuperVidel"
 };
 
-typedef void (*blit_func)(uint8* src, uint8* dst, uint32 size, uint8* pal);
+uint8*	blit_PaletteMap = 0;
+uint8*	blit_CompareBuf = 0;
 
+typedef void (*blit_func)(uint8* src, uint8* dst, uint32 size);
 extern uint32* pmmu_68030_map(uint32 logaddr, uint32 physaddr, uint32 size, uint32 flag);
 extern "C" uint32* pmmu_68040_get_pagetable(uint32 logaddr);
 
 extern "C" {
-void c2p1x1_8_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 8bit -> Atari 8bit
-void c2p1x1_8_from_8_halfx(uint8*dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 8bit, half width
-void c2p1x1_4_from_8(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 8bit -> Atari 4bit
-void c2p1x1_4_from_8_halfx(uint8* dst, uint8* src, uint32 size, uint8* pal);		// Apple 8bit -> Atari 4bit, half width
-void c2p1x1_4_from_4(uint8* dst, uint8* src, uint32 size, uint8* pal);				// Apple 4bit -> Atari 4bit
-void c2p1x1_8_from_8_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 8bit
-void c2p1x1_8_from_8_060_halfx(uint8*dst, uint8* src, uint32 size, uint8* pal);		// Apple 8bit -> Atari 8bit, half width
-void c2p1x1_4_from_8_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 8bit -> Atari 4bit
-void c2p1x1_4_from_8_060_halfx(uint8* dst, uint8* src, uint32 size, uint8* pal);	// Apple 8bit -> Atari 4bit, half width
-void c2p1x1_4_from_4_060(uint8* dst, uint8* src, uint32 size, uint8* pal);			// Apple 4bit -> Atari 4bit
+void c2p1x1_8_from_8(uint8* dst, uint8* src, uint32 size);				// Apple 8bit -> Atari 8bit
+void c2p1x1_8_from_8_halfx(uint8*dst, uint8* src, uint32 size);			// Apple 8bit -> Atari 8bit, half width
+void c2p1x1_4_from_8(uint8* dst, uint8* src, uint32 size);				// Apple 8bit -> Atari 4bit
+void c2p1x1_4_from_8_halfx(uint8* dst, uint8* src, uint32 size);		// Apple 8bit -> Atari 4bit, half width
+void c2p1x1_4_from_4(uint8* dst, uint8* src, uint32 size);				// Apple 4bit -> Atari 4bit
+void c2p1x1_8_from_8_060(uint8* dst, uint8* src, uint32 size);			// Apple 8bit -> Atari 8bit
+void c2p1x1_8_from_8_060_halfx(uint8*dst, uint8* src, uint32 size);		// Apple 8bit -> Atari 8bit, half width
+void c2p1x1_4_from_8_060(uint8* dst, uint8* src, uint32 size);			// Apple 8bit -> Atari 4bit
+void c2p1x1_4_from_8_060_halfx(uint8* dst, uint8* src, uint32 size);	// Apple 8bit -> Atari 4bit, half width
+void c2p1x1_4_from_4_060(uint8* dst, uint8* src, uint32 size);			// Apple 4bit -> Atari 4bit
 };
 
-void rgb555le_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
+void rgb555le_from_rgb555be(uint8* dst, uint8* src, uint32 size)
 {
 	uint16* s = (uint16*)src;
 	uint16* d = (uint16*)dst;
@@ -94,7 +96,7 @@ void rgb555le_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
 	}
 }
 
-void rgb565le_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
+void rgb565le_from_rgb555be(uint8* dst, uint8* src, uint32 size)
 {
 	uint16* s = (uint16*)src;
 	uint16* d = (uint16*)dst;
@@ -115,7 +117,7 @@ void rgb565le_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
 	}
 }
 
-void rgb565be_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
+void rgb565be_from_rgb555be(uint8* dst, uint8* src, uint32 size)
 {
 	const uint32 m0 = 0x001F001F;
 	const uint32 m1 = 0xFFC0FFC0;
@@ -132,11 +134,11 @@ void rgb565be_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
 	}
 }
 
-void rgbxxxxx_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
+void rgbxxxxx_from_rgb555be(uint8* dst, uint8* src, uint32 size)
 {
 	uint16* s = (uint16*)src;
 	uint16* d = (uint16*)dst;
-	uint16* p = (uint16*)pal;
+	uint16* p = (uint16*)blit_PaletteMap;
 	while (size >= 16)
 	{
 		uint16 c;
@@ -146,11 +148,11 @@ void rgbxxxxx_from_rgb555be(uint8* dst, uint8* src, uint32 size, uint8* pal)
 	}	
 }
 
-void rgb565be_from_8bit(uint8* dst, uint8* src, uint32 size, uint8* pal)
+void rgb565be_from_8bit(uint8* dst, uint8* src, uint32 size)
 {
 	uint8* s = (uint8*)src;
 	uint16* d = (uint16*)dst;
-	uint16* p = (uint16*)pal;
+	uint16* p = (uint16*)blit_PaletteMap;
 	while (size >= 16)
 	{
 		uint16 c;
@@ -230,8 +232,7 @@ protected:
 	uint16* pageTableCopy;
 	uint16 pageSize;
 	uint16 pageShift;
-	uint32* compareBuffer;
-	uint16 hashSize;
+	uint8* compareBuffer;
 	bool lowRes;
 	bool scaled;
 	int16 lowResOffX;
@@ -560,7 +561,7 @@ bool AtariScreenInfo(int32 mode, bool& native, uint32& mem)
 		if (w < 640) w = 640;
 		if (h < 480) h = 480;
 		mem = w * h * 2;					// 16bpp mac framebuffer
-		mem += (mem / 32);					// compare buffer
+		mem += (w * h);						// compare buffer
 		mem += 8 * (((w * h) + 256) / 256);	// pagetable x2
 		mem += 256 * 1024;					// alignment, padding, pagetables, etc..
 	}
@@ -771,9 +772,8 @@ VideoDriver::VideoDriver()
 	, pageSize(0)
 	, pageShift(0)
 	, compareBuffer(NULL)
-	, hashSize(0)
 	, lowRes(false)
-	, scaled(true)
+	, scaled(false)
 	, lowResOffX(0)
 	, lowResOffY(0)
 {
@@ -791,6 +791,8 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		return monitor;
 
 	screen = scr;
+
+	frameSkip = PrefsFindInt32("frameskip");
 
 	// change mode
 	int32 forceMode = PrefsFindInt32("video_mode");
@@ -974,7 +976,7 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		const uint32 alignMask = (alignSize - 1);
 
 		const uint32 screenBufSize = ((((largestMode.y * largestMode.bytes_per_row) + alignMask) & ~alignMask) + (alignSize << 1));
-		const uint32 compareBufferSize = (screenBufSize / 32) << 2;
+		const uint32 compareBufferSize = screen.width * screen.height;
 		const uint32 pageTableCopySize = 2 * ((screenBufSize + 256) / 256);
 		const uint32 totalSize = alignSize + screenBufSize + alignSize + compareBufferSize + alignSize + pageTableCopySize;
 
@@ -989,7 +991,7 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 
 		memset((void*)memptr, 0, totalSize);
 		emulatedScreen = (uint8*) ((memptr + alignMask) & ~alignMask);
-		compareBuffer = (uint32*) (emulatedScreen + screenBufSize + alignSize);
+		compareBuffer = (uint8*) (emulatedScreen + screenBufSize + alignSize);
 
 		log(" emulatedScreen: %08x (%d, %d, %d)\n", emulatedScreen, largestMode.x, largestMode.y, largestMode.depth);
 		log(" compareBuffer:  %08x\n", compareBuffer);
@@ -1001,7 +1003,6 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		{
 			pageTable = 0;
 			pageSize = 0;
-			hashSize = 256;
 		}
 		else
 		{
@@ -1012,8 +1013,6 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				{
 					pageSize = MMU040_PAGESIZE;
 					pageShift = MMU040_PAGESHIFT;
-					hashSize = 32;
-
 					for (uint16 i=0; i<(screenBufSize / pageSize); i++)
 					{
 						uint32 desc = pageTable[i];
@@ -1028,11 +1027,6 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				pageTable = pmmu_68030_map((uint32)emulatedScreen, (uint32)emulatedScreen, screenBufSize, 0x40);	// cache-inhibit
 				pageSize = MMU030_PAGESIZE;
 				pageShift = MMU030_PAGESHIFT;
-			#if 0 //MMU030_PAGESIZE < 1024
-				hashSize = 0;
-			#else
-				hashSize = 32;
-			#endif
 				FlushATC030();
 				FlushCache030();
 				ZPState[ZEROPAGE_MAC].mmu.m030.ttr0 |=  (1<<9);	// Transparent reads
@@ -1040,20 +1034,13 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 				FlushATC030();
 				FlushCache030();
 			}
-			pageTableCopy = (uint16*) (((uint8*)compareBuffer) + compareBufferSize + alignSize);
+			pageTableCopy = (uint16*) (compareBuffer + compareBufferSize + alignSize);
 			log(" pageTableCopy:  %08x\n", pageTableCopy);
-		}
-
-		// ignore compare buffer when in slow ram
-		if (/*(compareBuffer < 0x01000000) ||*/ (PrefsFindBool("video_cmp") == false))
-		{
-			compareBuffer = NULL;
-			hashSize = 0;
 		}
 
 		ExitSection(SECTION_DEBUG);
 		SetSR(sr);
-		log(" pageTable:      %08x (%d %d %d)\n", pageTable, pageSize, pageShift, hashSize);
+		log(" pageTable:      %08x (%d %d %d)\n", pageTable, pageSize, pageShift);
 	}
 
 	init_ok = true;
@@ -1390,6 +1377,9 @@ void VideoDriver::SetPalette(uint8 *pal, int num)
 	}
 }
 
+
+extern int16 blockVideoInts;
+
 void VideoDriver::Update()
 {
 	// emulation
@@ -1400,6 +1390,8 @@ void VideoDriver::Update()
 		if (frameSkipper <= frameSkip)
 			return;
 		frameSkipper = 0;
+
+		blockVideoInts++;
 
 		if (macPaletteDirty && shouldDelayPaletteUpdate)
 		{
@@ -1482,6 +1474,8 @@ void VideoDriver::Update()
 				}
 			}
 		}
+
+		blockVideoInts--;
 	}
 	// native
 	else if (macPaletteDirty && shouldDelayPaletteUpdate)
@@ -1500,6 +1494,9 @@ void VideoDriver::UpdateScreen()
 
 	uint8* src = blitSrc;
 	uint8* dst = blitDst;
+
+	blit_CompareBuf = compareBuffer;
+	blit_PaletteMap = softPalette;
 
 	const video_mode& mode = monitor->get_current_mode();
 	const uint32 macScreenSize = mode.y * mode.bytes_per_row;
@@ -1524,12 +1521,12 @@ void VideoDriver::UpdateScreen()
 	uint16* pageTablePtr = NULL;
 	if (pageTable && pageTableCopy && !fullRedraw)
 	{
-		uint16 sr = DisableInterrupts();
+		blockVideoInts++;
 		FlushATC();
-	#if ENABLE_VIDEODEBUG
+		#if ENABLE_VIDEODEBUG
 		if (videoDebug & DBGFLAG_CACHE_FLUSH1)
 			FlushCache();
-	#endif
+		#endif
 		uint32* pageSrc = pageTable;
 		uint16* pageDst = pageTableCopy;
 		uint16 count = remainBytes ? pageCount + 1 : pageCount;
@@ -1541,26 +1538,18 @@ void VideoDriver::UpdateScreen()
 			*pageSrc++ = desc & ~flag;
 			count--;
 		}
-		SetSR(sr);
+		blockVideoInts--;
 		pageTablePtr = pageTableCopy;
 	}
 
 	if (lowRes)
 	{
-		uint16 srcBytesPerRow = scaled ? mode.bytes_per_row : (mode.bytes_per_row >> 1);
-
-		if (fullRedraw || (pageTablePtr == 0))
+		// special case for ST/TT low resolution
+		if (pageTablePtr && !fullRedraw)
 		{
-			fullRedraw = false;
-			for (uint16 y=0; y<screen.height; y++)
-			{
-				blitFunc(dst, lowResOffs[y], srcBytesPerRow, softPalette);
-				dst += screen.bytesPerLine;
-			}
-		}
-		else
-		{
+			// mmu acceleration
 			const uint32 dstInc = screen.bytesPerLine;
+			const uint16 srcBytesPerRow = scaled ? mode.bytes_per_row : (mode.bytes_per_row >> 1);
 			for (uint16 y=0; y<screen.height; y++)
 			{
 				uint8* src = lowResOffs[y];
@@ -1573,137 +1562,62 @@ void VideoDriver::UpdateScreen()
 					page++;
 				}
 				if (desc & mmuModifiedFlag)
-					blitFunc(dst, src, srcBytesPerRow, softPalette);
+					blitFunc(dst, src, srcBytesPerRow);
 			#if DEBUG_MMU
 				else
 					memset(dst, 0x00, dstInc);
 			#endif
 				dst += dstInc;
+				blit_CompareBuf += dstInc;
+			}
+		}
+		else
+		{
+			// no mmu or forced redraw
+			fullRedraw = false;
+			const uint32 dstInc = screen.bytesPerLine;
+			const uint16 srcBytesPerRow = scaled ? mode.bytes_per_row : (mode.bytes_per_row >> 1);
+			for (uint16 y=0; y<screen.height; y++)
+			{
+				blitFunc(dst, lowResOffs[y], srcBytesPerRow);
+				dst += dstInc;
+				blit_CompareBuf += dstInc;
 			}
 		}
 	}
 	else
 	{
-		if (fullRedraw)
-		{
-			// full redraw
-			fullRedraw = false;
-			blitFunc(dst, src, macScreenSize, softPalette);
-		}
-		else if ((pageTablePtr == NULL) || (pageSize == 0))
-		{
-			// no mmu acceleration
-			if ((compareBuffer == NULL) || (hashSize < 32))
-			{
-				// no compare acceleration
-				blitFunc(dst, src, macScreenSize, softPalette);
-			}
-			else
-			{
-				// compare acceleration
-				uint32 hashCount = macScreenSize / hashSize;
-				uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-				uint32* cmpDst = compareBuffer;
-				uint16 chunkCount = hashSize >> 5;
-				while (hashCount)
-				{
-					uint32* cmpSrc = (uint32*)src;
-					uint32 oldHash = *cmpDst;
-					uint32 hash = (uint32)cmpSrc;
-					uint16 chunks = chunkCount;
-					while (chunks)
-					{
-						hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-						hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-						chunks--;
-					}
-					if (hash != oldHash)
-						blitFunc(dst, src, hashSize, softPalette);
-				#if DEBUG_MMU
-					else
-						memset(dst, 0xFF, hashSizeDst);
-				#endif
-					src += hashSize;
-					dst += hashSizeDst;
-					*cmpDst++ = hash;
-					hashCount--;
-				}
-			}
-		}
-		else
+		if (pageTablePtr && !fullRedraw)
 		{
 			// mmu acceleration
 			uint16* page = pageTablePtr;
 			const uint16* lastPage = pageTablePtr + pageCount;
 			const uint32 pageSizeDst = ((uint32(pageSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-			if ((hashSize == 0) || (compareBuffer == NULL))
+			while (page < lastPage)
 			{
-				// no compare acceleration
-				while (page < lastPage)
-				{
-					if (*page & mmuModifiedFlag)
-						blitFunc(dst, src, pageSize, softPalette);
+				if (*page & mmuModifiedFlag) {
+					blitFunc(dst, src, pageSize);
+				}
 				#if DEBUG_MMU
-					else
-						memset(dst, 0, pageSizeDst);
+				else {
+					memset(dst, 0, pageSizeDst);
+				}
 				#endif
-					src += pageSize;
-					dst += pageSizeDst;
-					page++;
-				}
+				src += pageSize;
+				dst += pageSizeDst;
+				blit_CompareBuf += pageSizeDst;
+				page++;
 			}
-			else
-			{
-				// compare acceleration
-				const uint16 hashCount = pageSize / hashSize;
-				uint32* cmpDst = compareBuffer;
-				uint16 hashSizeDst = ((uint32(hashSize) * screen.bpp) / srcBits) >> (lowRes ? 1 : 0);
-
-				while (page < lastPage)
-				{
-					if (*page & mmuModifiedFlag)
-					{
-					#if DEBUG_MMU
-						memset(dst, 0x00, pageSizeDst);
-					#endif
-						src += pageSize;
-						dst += pageSizeDst;
-						cmpDst += hashCount;
-					}
-					else
-					{
-						uint16 count = hashCount;
-						while (count)
-						{
-							uint32* cmpSrc = (uint32*)src;
-							uint32 oldHash = *cmpDst;
-							uint32 hash = (uint32)cmpSrc;
-							uint16 dohash = (hashSize >> 5);
-							while (dohash)
-							{
-								hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-								hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++; hash += *cmpSrc++;
-								dohash--;
-							}
-							if (hash != oldHash)
-								blitFunc(dst, src, hashSize, softPalette);
-						#if DEBUG_MMU
-							else
-								memset(dst, 0xFF, hashSizeDst);
-						#endif
-							src += hashSize;
-							dst += hashSizeDst;
-							*cmpDst++ = hash;
-							count--;
-						}
-					}
-					page++;
-				}
-			}
-
+	
 			// remaining bytes
 			if (remainBytes && (*page & mmuModifiedFlag))
-				blitFunc(dst, src, remainBytes, softPalette);
+				blitFunc(dst, src, remainBytes);
+		}
+		else
+		{
+			// no mmu or forced redraw
+			blitFunc(dst, src, macScreenSize);
+			fullRedraw = false;
 		}
 	}
 
@@ -1805,7 +1719,7 @@ void VideoDriver::UpdatePalette(uint8* colors, uint16 numcolors)
 					c1 = *dpal++ >> 2;	// green
 					c2 = (c1 > g) ? c1 - g : g - c1;
 					c2 = c2 * c2;
-					sum += /*((c2<<1) +*/ (c2<<2);
+					sum += /*(c2<<1) +*/ (c2<<2);
 					c1 = *dpal++ >> 2;	// blue
 					c2 = (c1 > b) ? c1 - b : b - c1;
 					c2 = c2 * c2;

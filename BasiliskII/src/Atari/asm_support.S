@@ -18,7 +18,26 @@
 * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
+	.bss
+	.even
+_FlushCache:	ds.l 1
+_FlushATC:		ds.l 1
+_SetCACR:		ds.l 1
+_GetCACR:		ds.l 1
+_GetMMU:		ds.l 1
+_SetMMU:		ds.l 1
+_oldPCR:		ds.l 1
+
+	.globl	_FlushCache
+	.globl	_FlushATC
+	.globl	_SetCACR
+	.globl	_GetCACR
+	.globl	_GetMMU
+	.globl	_SetMMU
+	.globl	_oldPCR
+
 	.text
+	.even
 	.globl	_SetZeroPage			// from ZeroPage.cpp
 	.globl	newAcia					// from acia.S
 
@@ -43,6 +62,7 @@
 	.globl	_VecMacException
 	.globl	_VecMacExceptionC
 	.globl	_VecMacFpuException
+
 
 
 // In Hatari, there is a situation where the SR register becomes broken when

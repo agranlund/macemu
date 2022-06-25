@@ -19,14 +19,37 @@
 */
 
 	.text
-    .globl  _Setup060
+	.globl	_GetPCR060
+    .globl  _SetPCR060
+	.globl	_FlushCache060
+	.globl	_SetCACR060
 
-_Setup060:
+_GetPCR060:
 	movec	pcr,d0
-	//bset	#0,d0		// disable super scalar
-	//bset	#1,d0		// disable fpu
-	bset	#5,d0		// disable super bypass
+	rts
+
+_SetPCR060:
+	move.l	4(sp),d0
 	movec	d0,pcr
+	rts
+
+_FlushCache060:
+	nop
+	cpusha	bc						// flush data + instruction caches
+	nop
+//	movec	cacr,d0
+//	or.l	0x00400000,d0			// flush branch cache
+//	movec	d0,cacr
+	rts
+
+_SetCACR060:
+	move.l	d0,-(sp)
+	move.l	8(sp),d0
+	nop
+	cpusha	bc
+	nop
+	movec	d0,cacr
+	move.l	(sp)+,d0
 	rts
 
 

@@ -33,3 +33,24 @@ Sound:
     some of the 060 rom patches from Amiga Shapeshifter (frestore has a
     different stack frame compared to 040)
 
+
+
+Bugs:
+
+
+CT60:
+	Tested in 928x720 resolution
+
+	060 graphics emulation. Runs but there are MMU issues.
+	also it doesnt seem really stable....
+	after a crash, 060 caches are off... not always, thats the odd part
+
+	basilisk start, exit at dialog = cache off
+		btw, its exit code which disable caches... hope it dont disable them just before basilisk run 😉
+
+	and another oddness: last few attempts to do all speed tests  failed, as speedometer crashed to TOS....
+	lcii, quadra, both roms, mmu/cmp on or off.
+
+
+
+928*720
