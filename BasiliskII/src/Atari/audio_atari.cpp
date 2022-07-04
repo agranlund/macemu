@@ -104,7 +104,8 @@ public:
 	void StopStream();
 	uint32 GetPos();
 	void Fill(uint8* dst, uint8* src, uint32 len);
-	static volatile uint16 pos;
+	static uint8* ptr;
+	static uint32 msk;
 private:
 	void InstallIrq();
 	void RemoveIrq();
@@ -131,6 +132,7 @@ static int speaker_volume = MAC_MAX_VOLUME;
 
 sndDriver* snd = NULL;
 uint8* snd_buffer = NULL;
+uint32 snd_buffer_mask = 0;
 uint32 snd_buffer_size = 0;
 uint32 snd_buffer_halfsize = 0;
 uint32 snd_buffer_pos = 0;
@@ -161,6 +163,7 @@ void audio_configure()
 	uint16 sr = DisableInterrupts();
 	snd_buffer_size = newsize;
 	snd_buffer_halfsize = snd_buffer_size >> 1;
+	snd_buffer_mask = (snd_buffer_size - 1);
 	snd_buffer_pos = 0;
 	if (snd)
 		snd->Configure();
@@ -305,7 +308,8 @@ void AudioInit(void)
 
 	// create buffer
 	snd_buffer_maxsize = audio_frames_per_block * 2 * 2 * 2;	// 16 bit stereo * 2 buffers
-	snd_buffer = Mxalloc((snd_buffer_maxsize<<1), (driver == SND_DRV_DMA) ? 0 : 3) + snd_buffer_maxsize;
+	uint32 align = (snd_buffer_maxsize * 2);
+	snd_buffer = (uint8*)((Mxalloc(align + snd_buffer_maxsize, (driver == SND_DRV_DMA) ? 0 : 3) + (align - 1)) & ~(align - 1));
 	if (!snd_buffer)
 	{
 		D(bug(" Err: failed allocating sound buffer\n"));
@@ -432,7 +436,7 @@ void AudioInterrupt(void)
 		return;
 
 	uint32 old_snd_buffer_pos = snd_buffer_pos;
-	snd_buffer_pos = snd->GetPos() & (snd_buffer_size - 1);
+	snd_buffer_pos = snd->GetPos() & snd_buffer_mask;
 	uint8* refill_ptr = 0;
 	if ((snd_buffer_pos < snd_buffer_halfsize) && (old_snd_buffer_pos >= snd_buffer_halfsize))
 		refill_ptr = snd_buffer + snd_buffer_halfsize;
@@ -809,139 +813,154 @@ void sndDriverDMA::Fill(uint8* dst, uint8* src, uint32 len)
 // Software sound driver (YM/Car/Printer)
 //
 //------------------------------------------------------
-volatile uint16 sndDriverST::pos = 0;
+uint8* sndDriverST::ptr = NULL;
+uint32 sndDriverST::msk = 0;
 extern const uint16 _soundTable_U8[];
 
-#define YM2149_REGSELECT	((volatile uint8*)0xFFFF8800)
-#define YM2149_REGDATA		((volatile uint8*)0xFFFF8802)
-
-/*
-#define YM2149_WR(r,d) {				\
-	uint16 v = (r << 8) | d; 			\
-	uint8* a = (uint8*) 0xFFFF8800;		\
-	__asm__ volatile					\
-	(									\
-		"movep.w	%0,0(%1)\n\t"		\
-	: : "d"(v), "a"(a) : "memory", "cc"	\
-	); \
-}
-*/
-#define YM2149_WR(r,d) { *YM2149_REGSELECT = (uint8) (r); *YM2149_REGDATA = d; }
-#define YM2149_RD(r,d) { *YM2149_REGSELECT = (uint8) (r); d = *YM2149_REGSELECT; }
+#define YM2149_REGSELECT		((volatile uint8*)0xFFFF8800)
+#define YM2149_REGDATA			((volatile uint8*)0xFFFF8802)
+#define YM2149_WR(r,d) 			{ *YM2149_REGSELECT = (uint8) (r); *YM2149_REGDATA = d; }
+#define YM2149_RD(r,d) 			{ *YM2149_REGSELECT = (uint8) (r); d = *YM2149_REGSELECT; }
 #define YM2149_WR_MASKED(r,d,m) { uint8 b = 0; YM2149_RD(r, b); b &= ~(m); b |= ((d)&(m)); YM2149_WR(r, b); }
-
-static void __attribute__ ((interrupt)) timerA_YM(void)
-{
-	volatile uint8* sample = &snd_buffer[sndDriverST::pos];
-	__asm__ volatile							\
-	(											\
-		"moveq.l	#0,d3\n\t"					\
-		"move.b		(%0),d3\n\t"				\
-		"lsl.w		#3,d3\n\t"					\
-		"move.l		0(%1,d3.w),d5\n\t"			\
-		"move.l		4(%1,d3.w),d4\n\t"			\
-		"lea.l		0x00ff8800,a4\n\t"			\
-		"movep.l	d5,0(a4)\n\t"				\
-		"movep.w	d4,0(a4)\n\t"				\
-	: 											\
-	: "a"(sample), "a"(_soundTable_U8)			\
-	: "d3", "d4", "d5", "a4", "memory", "cc"	\
-	);
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
-	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
-}
-
-static void __attribute__ ((interrupt)) timerA_YM_Falcon(void)
-{
-	volatile uint8* sample = &snd_buffer[sndDriverST::pos];
-	__asm__ volatile							\
-	(											\
-		"moveq.l	#0,d3\n\t"					\
-		"move.b		(%0),d3\n\t"				\
-		"lsl.w		#3,d3\n\t"					\
-		"move.l		0(%1,d3.w),d5\n\t"			\
-		"move.l		4(%1,d3.w),d4\n\t"			\
-		"lea.l		0x00ff8800,a4\n\t"			\
-		"movep.w	d5,0(a4)\n\t"				\
-		"swap		d5\n\t"						\
-		"movep.w	d5,0(a4)\n\t"				\
-		"movep.w	d4,0(a4)\n\t"				\
-	: 											\
-	: "a"(sample), "a"(_soundTable_U8)			\
-	: "d3", "d4", "d5", "a4", "memory", "cc"	\
-	);
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
-	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
-}
-
-
-static void __attribute__ ((interrupt)) timerA_YM_040(void)
-{
-	volatile uint8* sample = &snd_buffer[sndDriverST::pos];
-	__asm__ volatile							\
-	(											\
-		"moveq.l	#0,d3\n\t"					\
-		"move.b		(%0),d3\n\t"				\
-		"lsl.w		#3,d3\n\t"					\
-		"add.l		d3,%1\n\t"					\
-		"move.b		(%1)+,0x00ff8800\n\t"		\
-		"move.b		(%1)+,0x00ff8802\n\t"		\
-		"move.b		(%1)+,0x00ff8800\n\t"		\
-		"move.b		(%1)+,0x00ff8802\n\t"		\
-		"move.b		(%1)+,0x00ff8800\n\t"		\
-		"move.b		(%1)+,0x00ff8802\n\t"		\
-	: 											\
-	: "a"(sample), "a"(_soundTable_U8)			\
-	: "d3", "memory", "cc"	\
-	);
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
-	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
-}
 
 static void __attribute__ ((interrupt)) timerA_NULL(void)
 {
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
-static void __attribute__ ((interrupt)) timerA_COVOX(void)
+static void __attribute__ ((interrupt)) timerA_YM(void)
 {
-	uint8 sample = snd_buffer[sndDriverST::pos];
-	YM2149_WR(15, sample);
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.b		(a0)+,d0\n\t"							\
+		"lsl.w		#3,d0\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"move.l		a0,d0\n\t"								\
+		"lea.l		0x8800.w,a0\n\t"						\
+		"move.l		4+__soundTable_U8(pc, d0.w),(a0)\n\t"	\
+		"move.l		__soundTable_U8(pc, d0.w),d0\n\t"		\
+		"movep.l	d0,0(a0)\n\t"							\
+	: : : "d0", "a0", "memory", "cc"	 					\
+	); 
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
-volatile uint8 cart_read_to_write;
+static void __attribute__ ((interrupt)) timerA_YM_Safe(void)
+{
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.b		(a0)+,d0\n\t"							\
+		"lsl.w		#3,d0\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"add.l		#__soundTable_U8,a0\n\t"				\
+		"move.b		(a0)+,0x8800.w\n\t"						\
+		"move.b		(a0)+,0x8802.w\n\t"						\
+		"move.b		(a0)+,0x8800.w\n\t"						\
+		"move.b		(a0)+,0x8802.w\n\t"						\
+		"move.b		(a0)+,0x8800.w\n\t"						\
+		"move.b		(a0)+,0x8802.w\n\t"						\
+	: : : "d0", "a0", "memory", "cc"						\
+	);
+	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
+}
+
+static void __attribute__ ((interrupt)) timerA_COVOX(void)
+{
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"move.b		#15,0x8800.w\n\t"						\
+		"move.b		(a0)+,0x8802.w\n\t"						\
+		"move.l		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+	: : : "d0", "a0", "memory", "cc"	 					\
+	); 
+	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
+}
+
 static void __attribute__ ((interrupt)) timerA_MV16(void)
 {
-	uint16 sample = snd_buffer[sndDriverST::pos] << 4;
-	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.b		(a0)+,d0\n\t"							\
+		"lsl.w		#4,d0\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"add.l		#0x00fa0000,a0\n\t"						\
+		"move.b		(a0),d0\n\t"							\
+	: : : "d0", "a0", "memory", "cc"	 					\
+	); 
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
 static void __attribute__ ((interrupt)) timerA_Replay8(void)
 {
-	uint16 sample = snd_buffer[sndDriverST::pos] << 1;
-	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
-	sndDriverST::pos = (sndDriverST::pos + 1) & (snd_buffer_size - 1);
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.b		(a0)+,d0\n\t"							\
+		"lsl.w		#1,d0\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"add.l		#0x00fa0000,a0\n\t"						\
+		"move.b		(a0),d0\n\t"							\
+	: : : "d0", "a0", "memory", "cc"	 					\
+	);
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
 static void __attribute__ ((interrupt)) timerA_Replay8S(void)
 {
-	uint16 sample = *((uint16*)(&snd_buffer[sndDriverST::pos]));
-	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + ((sample << 1) & 0x1FE)));
-	cart_read_to_write = *((volatile uint8*)(0x00fa0200 + ((sample >> 7) & 0x1FE)));
-	sndDriverST::pos = (sndDriverST::pos + 2) & (snd_buffer_size - 1);
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.w		(a0)+,d1\n\t"							\
+		"move.b		d1,d0\n\t"								\
+		"lsl.w		#1,d0\n\t"								\
+		"lsr.w		#7,d1\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"add.l		#0x00fa0000,a0\n\t"						\
+		"move.b		(a0),d0\n\t"							\
+		"move.l		#0x00fa0200,a0\n\t"						\
+		"add.w		d1,a0\n\t"								\
+		"move.b		(a0),d0\n\t"							\
+	: : : "d0", "d1", "a0", "memory", "cc" 					\
+	);	
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
 static void __attribute__ ((interrupt)) timerA_Replay16(void)
 {
-	uint16 sample = *((uint16*)(&snd_buffer[sndDriverST::pos])) >> 1;
-	cart_read_to_write = *((volatile uint8*)(0x00fa0000 + sample));
-	sndDriverST::pos = (sndDriverST::pos + 2) & (snd_buffer_size - 1);
+	__asm__ volatile										\
+	(														\
+		"move.l		__ZN11sndDriverST3ptrE,a0\n\t"			\
+		"moveq.l	#0,d0\n\t"								\
+		"move.w		(a0)+,d0\n\t"							\
+		"lsr.w		#1,d0\n\t"								\
+		"exg		a0,d0\n\t"								\
+		"and.l		__ZN11sndDriverST3mskE,d0\n\t" 			\
+		"move.l		d0,__ZN11sndDriverST3ptrE\n\t" 			\
+		"add.l		#0x00fa0000,a0\n\t"						\
+		"move.b		(a0),d0\n\t"							\
+	: : : "d0", "a0", "memory", "cc"	 					\
+	);	
 	*TIMERA_REG_SERVICE = ~TIMERA_MASK_ENABLE;
 }
 
@@ -1007,7 +1026,6 @@ void sndDriverST::InstallIrq()
 
 	ctrl = bestCtrl;
 	*TIMERA_REG_ENABLE 	&= ~TIMERA_MASK_ENABLE;
-	//*TIMERA_REG_MASK 	&= ~TIMERA_MASK_ENABLE;
 	*TIMERA_REG_MASK 	|= TIMERA_MASK_ENABLE;
 	*TIMERA_REG_PENDING	&= ~TIMERA_MASK_ENABLE;
 	*TIMERA_REG_SERVICE	&= ~TIMERA_MASK_ENABLE;
@@ -1033,15 +1051,10 @@ void sndDriverST::InstallIrq()
 			YM2149_WR(11,0);
 			YM2149_WR(12,0);
 			YM2149_WR(13,0);
-			if (HostCPUType >= 4)
+			if (isFalcon || (HostCPUType >= 4))
 			{
-				SetMacVector(TIMERA_VECTOR, timerA_YM_040);
-				SetTosVector(TIMERA_VECTOR, timerA_YM_040);
-			}
-			else if (isFalcon)
-			{
-				SetMacVector(TIMERA_VECTOR, timerA_YM_Falcon);
-				SetTosVector(TIMERA_VECTOR, timerA_YM_Falcon);
+				SetMacVector(TIMERA_VECTOR, timerA_YM_Safe);
+				SetTosVector(TIMERA_VECTOR, timerA_YM_Safe);
 			}
 			else
 			{
@@ -1103,7 +1116,7 @@ void sndDriverST::RemoveIrq()
 	*TIMERA_REG_CTRL    = (~TIMERA_MASK_CTRL) & (*TIMERA_REG_CTRL);
 	*TIMERA_REG_PENDING &= ~TIMERA_MASK_ENABLE;
 	*TIMERA_REG_SERVICE &= ~TIMERA_MASK_ENABLE;
-	//*TIMERA_REG_MASK    &= ~TIMERA_MASK_ENABLE;
+	*TIMERA_REG_MASK    &= ~TIMERA_MASK_ENABLE;
 	irqInstalled = false;
 }
 
@@ -1116,7 +1129,8 @@ void sndDriverST::Configure()
 	uint16 sr = DisableInterrupts();
 	RemoveIrq();
 	InstallIrq();
-	sndDriverST::pos = 0;
+	sndDriverST::ptr = snd_buffer;
+	sndDriverST::msk = (uint32)snd_buffer | snd_buffer_mask;
 	SetSR(sr);
 	if (streamStarted)
 		*TIMERA_REG_ENABLE |= TIMERA_MASK_ENABLE;
@@ -1150,7 +1164,7 @@ void sndDriverST::StopStream()
 
 uint32 sndDriverST::GetPos()
 {
-	return pos;
+	return sndDriverST::ptr - snd_buffer;
 }
 
 void sndDriverST::Fill(uint8* dst, uint8* src, uint32 len)
