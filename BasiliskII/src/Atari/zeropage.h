@@ -120,6 +120,10 @@ struct ZeroPageState
     MMURegs mmu;
     uint32* vbr;
 	uint32	cacr;
+	uint8	tcen;
+	uint8	tcdata;
+	uint8	tcctrl;
+	uint8	padding;
 };
 
 extern ZeroPageState ZPState[3];

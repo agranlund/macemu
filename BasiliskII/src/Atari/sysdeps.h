@@ -104,4 +104,6 @@ extern "C" void aprintf(const char *fmt, ...);
 extern "C" char* astrdup(const char* s);
 #endif
 
+#include "timer_atari.h"
+
 #endif

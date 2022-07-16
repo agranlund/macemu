@@ -61,7 +61,7 @@
 #include "extfs.h"
 #include "extfs_defs.h"
 
-#ifdef WIN32
+#if defined WIN32 || defined ATARI
 # include "posix_emu.h"
 #endif
 
@@ -440,10 +440,12 @@ void ExtFSInit(void)
 	if (path != NULL) {
 		strncpy(RootPath, path, MAX_PATH_LENGTH - 1);
 		RootPath[MAX_PATH_LENGTH - 1] = 0;
-		if (stat(RootPath, &root_stat))
+		if (stat(RootPath, &root_stat)) {
 			return;
-		if (!S_ISDIR(root_stat.st_mode))
+		}
+		if (!S_ISDIR(root_stat.st_mode)) {
 			return;
+		}
 		ready = true;
 	}
 }
@@ -480,15 +482,17 @@ void InstallExtFS(void)
 	M68kRegisters r;
 
 	D(bug("InstallExtFS\n"));
-	if (!ready)
+	if (!ready) {
+		D(bug(" Err: not ready\n"));
 		return;
+	}
 
 	// FSM present?
 	r.d[0] = gestaltFSAttr;
 	Execute68kTrap(0xa1ad, &r);	// Gestalt()
 	D(bug("FSAttr %d, %08x\n", r.d[0], r.a[0]));
 	if ((r.d[0] & 0xffff) || !(r.a[0] & (1 << gestaltHasFileSystemManager))) {
-		printf("WARNING: No FSM present, disabling ExtFS\n");
+		D(bug("WARNING: No FSM present, disabling ExtFS\n"));
 		return;
 	}
 
@@ -497,7 +501,7 @@ void InstallExtFS(void)
 	Execute68kTrap(0xa1ad, &r);	// Gestalt()
 	D(bug("FSMVersion %d, %08x\n", r.d[0], r.a[0]));
 	if ((r.d[0] & 0xffff) || (r.a[0] < 0x0120)) {
-		printf("WARNING: FSM <1.2 found, disabling ExtFS\n");
+		D(bug("WARNING: FSM <1.2 found, disabling ExtFS\n"));
 		return;
 	}
 
@@ -736,7 +740,7 @@ void InstallExtFS(void)
 	return;
 
 fsdat_error:
-	printf("FATAL: ExtFS data block initialization error\n");
+	D(bug("FATAL: ExtFS data block initialization error\n"));
 	QuitEmulator();
 }
 

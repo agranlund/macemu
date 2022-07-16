@@ -59,6 +59,10 @@ struct TMDesc {
 const int NUM_DESCS = 64;		// Maximum number of descriptors
 static TMDesc desc[NUM_DESCS];
 
+static tm_time_t wakeup_time_max = { 0x7fffffff, 999999999 };
+tm_time_t wakeup_time = wakeup_time_max;
+
+
 
 /*
  *  Allocate descriptor for given TMTask in list
@@ -280,6 +284,18 @@ int16 PrimeTime(uint32 tm, int32 time)
 	// Make task active and enqueue it in the Time Manager queue
 	WriteMacInt16(tm + qType, ReadMacInt16(tm + qType) | 0x8000);
 	enqueue_tm(tm);
+
+	// Keep track of next wakeup
+	for (int i=0; i<NUM_DESCS; i++) {
+		if (desc[i].in_use) {
+			uint32 tm = desc[i].task;
+			if (ReadMacInt16(tm + qType) & 0x8000) {
+				if (timer_cmp_time(desc[i].wakeup, wakeup_time) < 0)
+					wakeup_time = desc[i].wakeup;
+			}
+		}
+	}
+
 	return 0;
 }
 
@@ -293,24 +309,37 @@ void TimerInterrupt(void)
 	// Look for active TMTasks that have expired
 	tm_time_t now;
 	timer_current_time(now);
-	for (int i=0; i<NUM_DESCS; i++)
+	wakeup_time = wakeup_time_max;
+	for (int i=0; i<NUM_DESCS; i++) {
 		if (desc[i].in_use) {
 			uint32 tm = desc[i].task;
-			if ((ReadMacInt16(tm + qType) & 0x8000) && timer_cmp_time(desc[i].wakeup, now) < 0) {
+			if (ReadMacInt16(tm + qType) & 0x8000) {
+				if (timer_cmp_time(desc[i].wakeup, now) < 0) {
+					// Found one, mark as inactive and remove it from the Time Manager queue
+					WriteMacInt16(tm + qType, ReadMacInt16(tm + qType) & 0x7fff);
+					dequeue_tm(tm);
 
-				// Found one, mark as inactive and remove it from the Time Manager queue
-				WriteMacInt16(tm + qType, ReadMacInt16(tm + qType) & 0x7fff);
-				dequeue_tm(tm);
+				#if 1
+					// Prevent accumulation of negative wakeups due to bad precision
+					// in combination with a mostly unsupported PrimeTime(0)
+					desc[i].wakeup = now;
+				#endif
 
-				// Call timer function
-				uint32 addr = ReadMacInt32(tm + tmAddr);
-				if (addr) {
-					D(bug("Calling TimeTask %08lx, addr %08lx\n", tm, addr));
-					M68kRegisters r;
-					r.a[0] = addr;
-					r.a[1] = tm;
-					Execute68k(addr, &r);
+					// Call timer function
+					uint32 addr = ReadMacInt32(tm + tmAddr);
+					if (addr) {
+						D(bug("Calling TimeTask %08lx, addr %08lx\n", tm, addr));
+						M68kRegisters r;
+						r.a[0] = addr;
+						r.a[1] = tm;
+						Execute68k(addr, &r);
+					}
+				}
+				else {
+					if (timer_cmp_time(desc[i].wakeup, wakeup_time) < 0)
+						wakeup_time = desc[i].wakeup;			
 				}
 			}
 		}
+	}
 }

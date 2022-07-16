@@ -36,6 +36,7 @@
 #include "debug.h"
 
 #define SUPPORT_8ON16BIT		1
+#define FORCE_EMUVIDEO			0
 #define ENABLE_VIDEODEBUG		0
 #define DEBUG_MMU				0
 #define DEBUG_CMP				0
@@ -163,6 +164,28 @@ void rgb565be_from_8bit(uint8* dst, uint8* src, uint32 size)
 		size -= 16;
 	}
 }
+
+#if FORCE_EMUVIDEO
+void blit_noconv(uint8* dst, uint8* src, uint32 size)
+{
+	register uint32* srcPtr = (uint32*)src;
+	register uint32* endPtr = (uint32*)(src + size);
+	register uint32* dstPtr = (uint32*)dst;
+	register uint32* cmpPtr = (uint32*)blit_CompareBuf;
+	while (srcPtr < endPtr)
+	{
+		register uint32 c = *srcPtr++;
+		if (c != *cmpPtr) {
+			*dstPtr++ = c;
+			*cmpPtr++ = c;
+		} else {
+			dstPtr++;
+			cmpPtr++;
+		}
+	}
+}
+#endif
+
 
 class MonitorDesc : public monitor_desc
 {
@@ -555,6 +578,11 @@ bool AtariScreenInfo(int32 mode, bool& native, uint32& mem)
 			emu = true;
 		}
 	}
+
+#if FORCE_EMUVIDEO
+	native = false;
+	emu = true;
+#endif
 
 	if (emu)
 	{
@@ -968,6 +996,10 @@ MonitorDesc* VideoDriver::Init(ScreenDesc& scr)
 		return NULL;
 	}
 
+#if FORCE_EMUVIDEO
+	hasEmulatedModes = true;
+#endif
+
 	if (hasEmulatedModes)
 	{
 		// todo: don't just assume the first mode is the largest one. it is right now, but may not always be...
@@ -1223,6 +1255,11 @@ bool VideoDriver::Setup()
 			break;
 		}
 	}
+
+#if FORCE_EMUVIDEO
+	if (blitFunc == NULL)
+		blitFunc = blit_noconv;
+#endif
 
 	// initialize mac frame buffer base
 	uint8* macFrameBase;

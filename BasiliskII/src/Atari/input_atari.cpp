@@ -53,11 +53,6 @@
 #define ACIA_FLAG_TX_RDY    (1 << 1)    // transmit buffer empty
 #define ACIA_FLAG_RX_RDY    (1 << 0)    // recieve buffer full
 
-#define VRES_SHIFT  3
-#define VRES_TO_PRES(x) ((x)>>VRES_SHIFT)
-#define PRES_TO_VRES(x) ((x)<<VRES_SHIFT)
-
-
 
 struct acia_packet
 {
@@ -79,22 +74,47 @@ mouse_state mouse_old;
 mouse_state mouse;
 uint8       keys[128];
 bool        input_inited = false;
-uint16      mouse_max_x = 400;
-uint16      mouse_max_y = 640;
 uint16      mouse_speed = 8;
 bool        mouse_requested = false;
+uint16      mouse_scale_to_vres_x = (1 << 8);
+uint16      mouse_scale_to_vres_y = (1 << 8);
+uint16      mouse_scale_to_pres_x = (1 << 8);
+uint16      mouse_scale_to_pres_y = (1 << 8);
 
-void ikbd_write(uint8 data)
+static inline uint16 VRES_TO_PRES_X(uint16 x) {
+    if (mouse_scale_to_pres_x != (1 << 8))
+        x = (((uint32)x) * mouse_scale_to_pres_x) >> 8;
+    return x;
+}
+
+static inline uint16 VRES_TO_PRES_Y(uint16 y) {
+    if (mouse_scale_to_pres_y != (1 << 8))
+        y = (((uint32)y) * mouse_scale_to_pres_y) >> 8;
+    return y;
+}
+
+static inline uint16 PRES_TO_VRES_X(uint16 x) {
+    if (mouse_scale_to_vres_x != (1 << 8))
+        x = (uint16) ((((uint32)x) * mouse_scale_to_vres_x) >> 8);
+    return x;
+}
+
+static inline uint16 PRES_TO_VRES_Y(uint16 y) {
+    if (mouse_scale_to_vres_y != (1 << 8))
+        y = (uint16) ((((uint32)y) * mouse_scale_to_vres_y) >> 8);
+    return y;
+}
+
+
+
+static inline void ikbd_write(uint8 data)
 {
-    while(1)
-    {
-        uint8 keyb_ctrl = *ACIA_REG_KEYCTRL;
-        if (keyb_ctrl & ACIA_FLAG_TX_RDY)
-        {
-            *ACIA_REG_KEYDATA = data;
-            return;
-        }
-    }
+    // wait for tx ready
+    while ((*ACIA_REG_KEYCTRL & ACIA_FLAG_TX_RDY) == 0) { }
+    // write to acia
+    *ACIA_REG_KEYDATA = data;
+    // wait for tx ready
+    while ((*ACIA_REG_KEYCTRL & ACIA_FLAG_TX_RDY) == 0) { }
 }
 
 volatile uint8 midi_data;
@@ -237,14 +257,16 @@ extern "C" void VecAciaC()
 
 void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
 {
-    log("InitInput %d, %d\n", resx, resy);
+    log(" InitInput: %d, %d\n", resx, resy);
+    log("  sens: %04x, %04x\n", sensx, sensy);
     bool setpos = false;
     if (!input_inited)
     {
         // mouse prefs
         mouse_speed = PrefsFindInt32("mouse_speed");
-        if (mouse_speed < 0)
-            mouse_speed = 1;
+        log("  mspd: %d\n", mouse_speed);
+        if (mouse_speed <= 0)
+            mouse_speed = 8;
         if (mouse_speed > 255)
             mouse_speed = 255;
 
@@ -268,12 +290,41 @@ void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
         setpos = true;
     }
 
-    mouse_max_x = resx - 1;
-    mouse_max_y = resy - 1;
+    // Note:
+    // IKBD_MOUSE_SCALE (0x0C) is bugged on Eiffel so we can't really use that.
+    // This sucks since we're loosing resolution when increasing speed but what can you do..
+    const bool ikbdMouseScaleWorks = false;
 
-    // absolute mouse mode
-    uint16 vresx = (resx-1) << VRES_SHIFT;
-    uint16 vresy = (resy-1) << VRES_SHIFT;
+    uint16 mouse_speed_x = 1;
+    uint16 mouse_speed_y = 1;
+
+    if (ikbdMouseScaleWorks)
+    {
+        mouse_scale_to_pres_x = (1 << 8) >> 3;
+        mouse_scale_to_pres_y = (1 << 8) >> 3;
+        mouse_scale_to_vres_x = (1 << 8) << 3;
+        mouse_scale_to_vres_y = (1 << 8) << 3;
+
+        mouse_speed_x = (mouse_speed * sensx) >> 8;
+        mouse_speed_y = (mouse_speed * sensy) >> 8;
+    }
+    else
+    {
+        mouse_scale_to_pres_x = (mouse_speed * sensx) >> 3;
+        mouse_scale_to_pres_y = (mouse_speed * sensy) >> 3;
+        mouse_scale_to_vres_x = ((1<<16) / mouse_scale_to_pres_x);
+        mouse_scale_to_vres_y = ((1<<16) / mouse_scale_to_pres_y);
+    }
+
+    uint16 vresx = PRES_TO_VRES_X(resx-1);
+    uint16 vresy = PRES_TO_VRES_Y(resy-1);
+
+    log("  pscl: %04x, %04x\n", mouse_scale_to_pres_x, mouse_scale_to_pres_y);
+    log("  vscl: %04x, %04x\n", mouse_scale_to_vres_x, mouse_scale_to_vres_y);
+    log("  mscl: %d, %d\n", mouse_speed_x, mouse_speed_y);
+    log("  vres: %d, %d\n", vresx, vresy);
+
+    // set absolute mouse mode
     ikbd_write(0x09);
     ikbd_write(vresx >> 8);
     ikbd_write(vresx & 0xFF);
@@ -281,17 +332,15 @@ void InitInput(uint16 resx, uint16 resy, uint16 sensx, uint16 sensy)
     ikbd_write(vresy & 0xFF);
 
     // set absolute mouse scaling
-    uint16 mouse_speed_x = (mouse_speed * sensx) >> 8;
-    uint16 mouse_speed_y = (mouse_speed * sensy) >> 8;
     ikbd_write(0x0C);
     ikbd_write(mouse_speed_x);
     ikbd_write(mouse_speed_y);
 
     // update absolute mouse position
-    if ((VRES_TO_PRES(mouse_old.mx) >= resx) || (VRES_TO_PRES(mouse_old.my) >= resy))
+    if ((VRES_TO_PRES_X(mouse_old.mx) >= resx) || (VRES_TO_PRES_Y(mouse_old.my) >= resy))
     {
-        mouse_old.mx = PRES_TO_VRES(16);
-        mouse_old.my = PRES_TO_VRES(16);
+        mouse_old.mx = PRES_TO_VRES_X(16);
+        mouse_old.my = PRES_TO_VRES_Y(16);
         setpos = true;
     }
     
@@ -530,7 +579,7 @@ void UpdateInput()
         {
             mouse_old.mx = mouse.mx;
             mouse_old.my = mouse.my;
-            ADBMouseMoved(VRES_TO_PRES(mouse.mx), VRES_TO_PRES(mouse.my));
+            ADBMouseMoved(VRES_TO_PRES_X(mouse.mx), VRES_TO_PRES_Y(mouse.my));
         }
         if (mouse.ms & 1)   ADBMouseDown(1);
         if (mouse.ms & 2)   ADBMouseUp(1);
@@ -546,8 +595,16 @@ void RequestInput()
     // ask for new mouse data
     if (input_inited && !mouse_requested)
     {
+#if 0
         mouse_requested = true;
         ikbd_write(0x0D);
+#else
+        if (*ACIA_REG_KEYCTRL & ACIA_FLAG_TX_RDY)
+        {
+            *ACIA_REG_KEYDATA = 0x0D;
+            mouse_requested = true;
+        }
+#endif
     }
 }
 
@@ -559,6 +616,6 @@ bool GetKeyStatus(uint8 key)
 
 void GetMouse(int16& x, int16& y)
 {
-    x = VRES_TO_PRES(mouse.mx);
-    y = VRES_TO_PRES(mouse.my);
+    x = VRES_TO_PRES_X(mouse.mx);
+    y = VRES_TO_PRES_Y(mouse.my);
 }

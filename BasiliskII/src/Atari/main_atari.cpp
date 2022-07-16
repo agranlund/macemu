@@ -119,6 +119,7 @@ bool isEmuTos = false;
 bool isMagic = false;
 bool isMint  = false;
 bool isFalcon = false;
+bool isTT = false;
 uint16 tosVersion = 0;
 int diskCacheSize = 0;
 
@@ -130,6 +131,11 @@ int HostFPUType = 0;
 bool TwentyFourBitAddressing = false;
 bool EmulationStarted = false;
 bool LogInitOnly = true;
+
+uint32 cpu_cacr_override_tos = 0xFFFFFFFF;
+uint32 cpu_cacr_override_mac = 0xFFFFFFFF;
+int32 cpu_pcr_override = 0xFFFFFFFF;
+
 
 // RAM and ROM pointers
 uint32 RAMBaseMac;				// RAM base (Mac address space)
@@ -191,33 +197,39 @@ void Start680x0()
 #endif
 
 	log("Start emulation\n");
-	log("Mac RAM: %08lx (%d)\n", RAMBaseHost, RAMSize / 1024);
-	log("Mac ROM: %08lx (%d)\n", ROMBaseHost, ROMSize / 1024);
-	log("Mac SCR: %08lx (%d)\n", ScratchMem, SCRATCH_MEM_SIZE / 1024);
-	log("Mac SP:  %08lx\n", stack);
+	log(" Mac RAM: %08lx (%d)\n", RAMBaseHost, RAMSize / 1024);
+	log(" Mac ROM: %08lx (%d)\n", ROMBaseHost, ROMSize / 1024);
+	log(" Mac SCR: %08lx (%d)\n", ScratchMem, SCRATCH_MEM_SIZE / 1024);
+	log(" Mac SP:  %08lx\n", stack);
 
-	if (LogInitOnly)
-		RestoreDebug();
-
-	EmulationStarted = true;
-
-	log(" Setting timers\n");
+	log(" Setting timers...\n");
 	timer_atari_set();
 
-	log(" Disabling interrupts\n");
+	log(" Disabling interrupts...\n");
 	DisableInterrupts();
 
-	log(" Setting zero page\n");
+	log(" Setting zero page...\n");
 	SetZeroPage(ZEROPAGE_MAC);
 
-	log(" Clearing zero page\n");
+	log(" Clearing zero page...\n");
 	void* zeroMem = (void*)0x00000000;
 	memset(zeroMem, 0x00, 8*1024);
 
-	log(" Init timers\n");
+	log(" Init timers...\n");
 	InitTimers();
 
-	log(" Booting macintosh\n");
+	log(" Flushing caches...\n");
+	FlushCache();
+	FlushATC();
+
+	if (LogInitOnly) {
+		log(" Disabling logging...\n");
+		log(" Booting Macintosh...\n");
+		RestoreDebug();
+	}
+	else {
+		log(" Booting Macintosh...\n");
+	}
 	BootMacintosh(stack);
 }
 
@@ -256,6 +268,32 @@ void app_exit()
 		rsrc_free();
 	}
 	appl_exit();
+}
+
+uint32 GetHexPrefs(const char* id, uint32 def)
+{
+	uint32 v = def;
+	const char* str = PrefsFindString(id);
+	if (str)
+	{
+		v = 0;
+		uint16 count = 0;
+		while (count < 8)
+		{
+			uint8 c = *str++;
+			if (c >= '0' && c <= '9') {
+				v <<= 4; v |= (c - '0');
+			} else if (c >='a' && c <= 'f') {
+				v <<= 4; v |= (c - 'a');
+			} else if (c >= 'A' && c <= 'A') {
+				v <<= 4; v |= c - 'A';
+			} else {
+				count = 8;
+			}
+			count++;
+		}
+	}
+	return v;
 }
 
 // --------------------------------------------------------------------
@@ -335,12 +373,18 @@ int super_main()
 	if (PrefsFindInt32("modelid") <= 0)
 		PrefsReplaceInt32("modelid", CPUType >= 4 ? 14 : 5);
 
+	// cpu related overrides
+	cpu_cacr_override_tos = GetHexPrefs("cpu_cacr_tos", 0xFFFFFFFF);
+	cpu_cacr_override_mac = GetHexPrefs("cpu_cacr_mac", 0xFFFFFFFF);
+	cpu_pcr_override = GetHexPrefs("cpu_pcr", 0xFFFFFFFF);
+
 	// early low level init
 	InitCPU();
 	InitZeroPage();
 
 	// Show preferences editor
 	InitDebug();
+
 	if (aesVersion > 0)
 	{
 		if (!PrefsFindBool("nogui"))
@@ -411,6 +455,7 @@ int super_main()
 	log(" %s\n", GetString(STR_ABOUT_TEXT2));
 
 	cookie = 0; Getcookie('_MCH', &cookie);
+	isTT = (cookie == 0x00020000);
 	isFalcon = ((cookie == 0x00030000) || (cookie == 0x00010100));
 	log("Atari: 680%d0, FPU: %02x MCH: %08x", HostCPUType, HostFPUType, cookie);
 	if (isEmuTos) {
@@ -471,9 +516,8 @@ int super_main()
 	if ((ROMSize < (1024*1024)) && (HostCPUType >= 4))
 	{
 		log("Disabling cpu cache (512k ROM on 68040+)\n");
-		uint16 sr = DisableInterrupts();
-		SetCACR(0);
-		SetSR(sr);
+		cpu_cacr_override_tos = 0;
+		cpu_cacr_override_mac = 0;
 	}
 
 	// Allocate host memory
@@ -789,34 +833,25 @@ void B2_delete_mutex(B2_mutex *mutex) {
 //--------------------------------------------------------
 // Mac interrupts
 //--------------------------------------------------------
+int16 blockInts = 0;
+int16 blockVideoInts = 0;
+
 static inline void SetInterruptFlag(uint32 flag)
 {
-	__asm__ volatile (			\
-		"	move.l	%1,d0\n"	\
-		"	or.l	d0,%0\n"	\
-		: "=m"(InterruptFlags) : "g"(flag) : "d0", "cc", "memory");	
+	InterruptFlags |= flag;
 }
 
 static inline void ClearInterruptFlag(uint32 flag)
 {
-	__asm__ volatile (			\
-		"	move.l	%1,d0\n"	\
-		"	not.l	d0\n"		\
-		"	and.l	d0,%0\n"	\
-		: "=m"(InterruptFlags) : "g"(flag) : "d0", "cc", "memory");
+	InterruptFlags &= ~flag;
 }
 
-int16 blockVideoInts = 0;
-int16 blockInts = 0;
 static inline void TriggerInterrupt(void)
 {
 	if (/*((GetSR() & 0x0700) == 0) &&*/ blockInts == 0)
 	{
-		if (GetZeroPage() == ZEROPAGE_MAC)
-		{
-			M68kRegisters r;
-			EmulOp(M68K_EMUL_OP_IRQ, &r);
-		}
+		M68kRegisters r;
+		EmulOp(M68K_EMUL_OP_IRQ, &r);
 	}
 }
 
@@ -839,12 +874,10 @@ struct trap_regs {	// This must match the layout of M68kRegisters
 	uint16 format;
 };
 
-extern "C" uint16 VecMacExceptionC(trap_regs *r)
+
+#if DEBUG && 0
+static void dumpRegs(trap_regs* r)
 {
-	uint16 vec = r->format & 0x0FFF;
-#if 0
-	D(bug(	"Vec 0x%08x\n", vec));
-	D(bug(	"PC  0x%08x\n", r->pc));
 	D(bug(	"d0 %08lx d1 %08lx d2 %08lx d3 %08lx\n"
 			"d4 %08lx d5 %08lx d6 %08lx d7 %08lx\n"
 			"a0 %08lx a1 %08lx a2 %08lx a3 %08lx\n"
@@ -853,107 +886,84 @@ extern "C" uint16 VecMacExceptionC(trap_regs *r)
 			r->d[0], r->d[1], r->d[2], r->d[3], r->d[4], r->d[5], r->d[6], r->d[7],
 			r->a[0], r->a[1], r->a[2], r->a[3], r->a[4], r->a[5], r->a[6], r->a[7],
 			r->sr, (uint32)ZPState[currentZeroPage].vbr));
+}
+#endif
+
+extern "C" uint16 VecMacExceptionC(trap_regs *r)
+{
+	uint16 vec = r->format & 0x0FFF;
+
+#if 0
+	D(bug(	"Vec 0x%08x, PC 0x%08x\n", vec, r->pc));
+	D(dumpRegs(r));
 #endif
 
 	if (vec == 0x10)
 	{
 		uint16 opcode = *(uint16*)(r->pc);
-	#ifndef NDEBUG
-	/*
+#if 1
+		if ((opcode & 0xff00) != 0x7100)
+			return 0;
+#elif 0
 		if ((opcode & 0xff00) != 0x7100)
 		{
 			D(bug("Illegal Instruction %04x at %08lx\n", *(uint16 *)(r->pc), r->pc));
-			D(bug("d0 %08lx d1 %08lx d2 %08lx d3 %08lx\n"
-				"d4 %08lx d5 %08lx d6 %08lx d7 %08lx\n"
-				"a0 %08lx a1 %08lx a2 %08lx a3 %08lx\n"
-				"a4 %08lx a5 %08lx a6 %08lx a7 %08lx\n"
-				"sr %04x\n",
-				r->d[0], r->d[1], r->d[2], r->d[3], r->d[4], r->d[5], r->d[6], r->d[7],
-				r->a[0], r->a[1], r->a[2], r->a[3], r->a[4], r->a[5], r->a[6], r->a[7],
-				r->sr));
+			D(dumpRegs(r));
 			QuitEmulator();
 		}
-	*/		
-	#endif
-
-		//uint16 sr = EmulatedSR;
-		//EmulatedSR |= 0x0700;
-		
-#if 0
-		uint16 sr = DisableInterrupts();
-#elif 0		
-		uint16 sr = GetSR();
-		SetSR(0x2000);
-#else
-		uint16 sr = GetSR();
-#endif		
-		blockInts++;
-#if EMULOP_DEBUG
-		D(bug("emulop: SR = %04x (%04x)\n", r->sr, sr));
 #endif
+
+		uint16 sr = GetSR();
+		blockInts++;
+		#if EMULOP_DEBUG
+			D(bug("emulop: SR = %04x (%04x)\n", r->sr, sr));
+		#endif
 		EnterSection(SECTION_MAC_EMUOP);
 		EmulOp(opcode, (M68kRegisters*)r);
 		ExitSection(SECTION_MAC_EMUOP);
 		r->pc += 2;
-		if (opcode != M68K_EMUL_OP_RESET)
-		{
-			//uint16 newsr = GetSR();
-			SetSR(sr);
-			blockInts--;
-			//if (((newsr & 0x0700) == 0) && InterruptFlags)
-			//if (((sr & 0x0700) == 0) && InterruptFlags)
-//			if (((r->sr & 0x0700) == 0) && InterruptFlags)
-			//	TriggerInterrupt();
-		}
-		else
+		if (opcode == M68K_EMUL_OP_RESET)
 		{
 			D(bug("EmulOp RESET\n"));
 			// reset, keep interrupts disabled
 			blockInts--;
 			r->sr = 0x2700;
-
-		#if QUIT_ON_RESET
-			static bool firstReset = true;
-			if (!firstReset)
-				QuitEmulator();
-			firstReset = false;
-		#endif
-			//return 2;
-			return 1;
+			#if QUIT_ON_RESET
+			{
+				static bool firstReset = true;
+				if (!firstReset)
+					QuitEmulator();
+				firstReset = false;
+			}
+			#endif
 		}
-		//EmulatedSR = sr;
-		//if ((EmulatedSR & 0x0700) == 0 && InterruptFlags)
-		//	Signal(MainTask, IRQSigMask);
-
+		else
+		{
+			SetSR(sr);
+			blockInts--;
+		}
 		return 1;
 	}
+	
 #if LINEA_DEBUG
 	else if (vec == 0x28)
 	{
 		uint16 opcode = *(uint16*)(r->pc);
-#if 1		
-		D(bug("LineA: 0x%04x\n", opcode));
-#else
-		D(bug("LineA: 0x%04x : %s\n", opcode, GetLineaFuncname(opcode)));
-#endif
+		#if 1
+			D(bug("LineA: 0x%04x\n", opcode));
+		#else
+			D(bug("LineA: 0x%04x : %s\n", opcode, GetLineaFuncname(opcode)));
+		#endif
 		SetSR(r->sr);
 		return 0;
 	}
 #endif
 
-//#ifndef NDEBUG
 #if 0
 	else
 	{
 		D(bug("Unhandled vector 0x%08x at 0x%08x\n", vec, r->pc));
-		D(bug(	"d0 %08lx d1 %08lx d2 %08lx d3 %08lx\n"
-				"d4 %08lx d5 %08lx d6 %08lx d7 %08lx\n"
-				"a0 %08lx a1 %08lx a2 %08lx a3 %08lx\n"
-				"a4 %08lx a5 %08lx a6 %08lx a7 %08lx\n"
-				"sr %04x vbr %08x\n",
-				r->d[0], r->d[1], r->d[2], r->d[3], r->d[4], r->d[5], r->d[6], r->d[7],
-				r->a[0], r->a[1], r->a[2], r->a[3], r->a[4], r->a[5], r->a[6], r->a[7],
-				r->sr, (uint32)ZPState[currentZeroPage].vbr));
+		D(dumpRegs(r));
 		QuitEmulator();
 	}
 #endif
@@ -969,215 +979,274 @@ extern "C" uint16 VecMacExceptionC(trap_regs *r)
 // Atari interrupts
 //
 //----------------------------------------------------------
-#define RESPECT_MAC_IRQLVL	0
+#define HIRES_TIMER_THRESHOLD	17
+#define IRQ_TIMERB				1
+#define IRQ_TIMERC				2
+#define tck1000					(( 49 * 1000000) / (2457600 /  50))
+#define tck200 					((192 * 1000000) / (2457600 /  64))
+#define tck60					((205 * 1000000) / (2457600 / 200))
 
-static volatile int16 irqActive = 0;
-static volatile bool onlyTimerC = false;
+#define COUNT_MISSED_VBLS		1
 
+static int16 irqActive = 0;				// timer b/c irq is active
+static uint16 missedVbls = 0;			// ignored vbls
 
-//----------------------------------------------------------
-// TimerB, 200hz
-//----------------------------------------------------------
-extern "C" void VecTimer1C(uint16 oldsr)
+extern tm_time_t globalTimerTime;		// timer_atari.cpp
+extern tm_time_t wakeup_time;			// timer.cpp
+
+static inline bool IsTimerExpired()
 {
-	#if TIMERB_200HZ
-	if (currentZeroPage == ZEROPAGE_TOS)
+	if (timer_cmp_time(wakeup_time, globalTimerTime) <= 0)
 	{
-		*((volatile uint32*)0x04BA) += 1;
+		D(bug("ite: wakeup = [%d:%d] (%x:%d)\n", wakeup_time.tv_sec, wakeup_time.tv_usec, wakeup_time.tv_sec, wakeup_time.tv_usec));
+		D(bug("ite: global = [%d:%d] (%x:%d)\n", globalTimerTime.tv_sec, globalTimerTime.tv_usec, globalTimerTime.tv_sec, globalTimerTime.tv_usec));
+		D(bug("TIMER EXPIRED: %d\n", wakeup_time.tv_sec - globalTimerTime.tv_sec));
+		return true;
 	}
-	#endif
-	*TIMERB_REG_SERVICE = ~TIMERB_MASK_ENABLE;
+	return false;
+}
+
+static inline bool IsHiresTimerEnabled()
+{
+	return (ZPState[ZEROPAGE_MAC].tcen != 0);
+}
+
+static inline void EnableHiresTimer()
+{
+	ZPState[ZEROPAGE_MAC].tcen = TIMERC_MASK_ENABLE;
+	*TIMERC_REG_ENABLE = (*TIMERC_REG_ENABLE & ~TIMERC_MASK_ENABLE) | ZPState[ZEROPAGE_MAC].tcen;
+}
+
+static inline void DisableHiresTimer()
+{
+	*TIMERC_REG_ENABLE = (*TIMERC_REG_ENABLE & ~TIMERC_MASK_ENABLE);
+	ZPState[ZEROPAGE_MAC].tcen = 0;
+}
+
+static inline bool HiresTimerNeeded()
+{
+	int32 sec = wakeup_time.tv_sec - globalTimerTime.tv_sec;
+	if (sec > 1)
+		return false;
+	if (sec < 0)
+		return true;
+#if 1
+	#define TIMERMUL1000(x) ((x)<<10)
+	#define TIMERDIV1000(x) ((x)>>10)
+#else
+	#define TIMERMUL1000(x) ((x)*1000)
+	#define TIMERDIV1000(x) ((x)/1000)
+#endif
+	int32 msec = TIMERMUL1000(sec);
+	msec += TIMERDIV1000((int32)wakeup_time.tv_usec - (int32)globalTimerTime.tv_usec);
+	D(bug("ms = %d [%d] [%d , %d]\n", msec, wakeup_time.tv_sec - globalTimerTime.tv_sec, wakeup_time.tv_usec, globalTimerTime.tv_usec));
+	return (msec < HIRES_TIMER_THRESHOLD);
+}
+
+
+//----------------------------------------------------------
+// Mac hires timer (100hz)
+//----------------------------------------------------------
+extern "C" void IntTimerCMac()	// 1000hz
+{
+	timer_atari_tick(tck1000);
+	if (irqActive || blockInts) {
+		*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
+		return;
+	}
+	if (IsTimerExpired()) {
+		irqActive = IRQ_TIMERC;							// busy
+		//*TIMERB_REG_MASK &= ~TIMERB_MASK_ENABLE;		// pause 60hz interrupts
+		//*TIMERC_REG_ENABLE &= ~TIMERC_MASK_ENABLE;	// disable 1000hz interrupts
+		*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;		// unblock mfp
+		SetSR(0x2500);									// enable mfp interrupts
+		TimerInterrupt();								// mac timer interrupt
+		// compensate for timers with even higher resolution
+		if (wakeup_time.tv_sec == globalTimerTime.tv_sec) {
+			if (wakeup_time.tv_usec < globalTimerTime.tv_usec)
+				wakeup_time.tv_usec = globalTimerTime.tv_usec;
+		}
+		irqActive = 0;									// not busy
+		//*TIMERB_REG_MASK |= TIMERB_MASK_ENABLE;			// resume 60hz interrupts
+		//*TIMERC_REG_ENABLE |= TIMERC_MASK_ENABLE;		// enable 1000hz interrupts
+		return;
+	}
+	*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
+	return;
 }
 
 //----------------------------------------------------------
-// TimerC, 1003hz
+// Mac system timer (60hz)
 //----------------------------------------------------------
-extern "C" void VecTimer2C(uint16 oldsr)
+extern "C" void IntTimerBMac()
 {
-	static volatile uint32 cnt1 = 0;
-	static volatile uint32 cnt60 = 0;
-	static volatile uint32 cnt200 = 0;
-	static volatile uint32 cntXpram = 0;
+	#define cntXpramInterval 	60			// check+save xpram every minute
+	#define cnt1hzInterval 		60			// 1hz interrupt every 60th 60hz interrupt
+	static int16 cntXpram = 10;				// perform first xpram save earlier
+	static int16 cnt1hz = cnt1hzInterval;
 
-	static volatile uint32 trg60 = 0;
+	// no reentrant past this point
+	if (irqActive)
+	{
+		if (!IsHiresTimerEnabled())
+			timer_atari_tick(tck60);
+		#if COUNT_MISSED_VBLS
+		missedVbls++;
+		#endif
+		*TIMERB_REG_SERVICE = ~TIMERB_MASK_ENABLE;
+		return;	
+	}
+	
+	#if COUNT_MISSED_VBLS
+	uint16 vbls = 1 + missedVbls;
+	missedVbls = 0;
+	#endif
 
-	static const uint32 tck = 49000000/(2457600/50);
-	static const uint32 tck200 = 1000000 / 200;
-	static const uint32 tck60 = 1000000 / 60;
+	// allow mfp interrupts to interrupt us
+	irqActive = IRQ_TIMERB;
+	*TIMERB_REG_SERVICE = ~TIMERB_MASK_ENABLE;
+	SetSR(0x2500);
 
-#if RESPECT_MAC_IRQLVL
-	const bool macIrqEnable = ((oldsr & 0x700) == 0);
-#else
-	const bool macIrqEnable = true;
-#endif
+	blockInts++;
+	uint32 irq = INTFLAG_AUDIO | INTFLAG_60HZ;
 
-	// 60hz counter
-	cnt60 += tck;
-	if (cnt60 >= tck60) {
-		cnt60 -= tck60;
-		trg60++;
+	// Mac timer interrupt
+	if (!IsHiresTimerEnabled()) {
+		timer_atari_tick(tck60);
+		if (IsTimerExpired()) {
+			TimerInterrupt();
+			if (HiresTimerNeeded()) {
+				D(bug("Enabling hires timer\n"));
+				EnableHiresTimer();
+			}
+		}
+	} else {
+		if (!HiresTimerNeeded()) {
+			D(bug("Disabling hires timer\n"));
+			DisableHiresTimer();
+		}
 	}
 
-	// agnostic time update
-	timer_atari_tick(tck);
-
-	//------------------------------------------
-	// TOS
-	//------------------------------------------
-	if (currentZeroPage == ZEROPAGE_TOS)
+	// Mac 1hz interrupt
+	cnt1hz--;
+	if (cnt1hz == 0)
 	{
-		#if !TIMERB_200HZ
-		{
-			// update tos 200hz counter to keep hard disk drivers happy
-			cnt200 += tck;
-			if (cnt200 >= tck200)
-			{
-				cnt200 -= tck200;
-				*((volatile uint32*)0x04BA) += 1;
-			}
-		}
-		#endif
+		cnt1hz = cnt1hzInterval;
+		uint32 tdt = TimerDateTime();
+		WriteMacInt32(0x20c, tdt);
+		irq |= INTFLAG_1HZ;
 
-		// tos fix1+: don't do limited mac vbl from here as it kills tos disk io
-		if (irqActive || TosIrqSafe)
-		{
-			*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
-			return;
-		}
+		#if DEBUG_PERIODIC_TICK
+		uint32 adsi = audio_data + adatStreamInfo;
+		D(bug("tick 1hz [%u, %u, %d, %d, cacr:%08x, a=%08x %08x %08x %d]\n", tdt, ReadMacInt32(0x16a), blockInts, section[SECTION_MAC_EMUOP], GetCACR(),
+			audio_data, *((uint32*)(audio_data + adatStreamInfo)), AudioStatus.mixer, AudioStatus.num_sources));
+		#endif			
 
-		// allow mfp interrupts to interrupt us
-		irqActive++;
-		*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
-		SetSR(0x2500);
-
-		// limited vblank to update mouse cursor
-		if (trg60 != 0)
+		// save xpram to disk every now and again
+		cntXpram--;
+		if (cntXpram == 0)
 		{
-			blockInts++;
-			UpdateInput();
-			SetZeroPage(ZEROPAGE_MAC);
-			WriteMacInt32(0x16a, ReadMacInt32(0x16a) + trg60);
-			if (HasMacStarted())
-			{
-				AudioInterrupt();
-				ADBInterrupt();
-				//VideoInterrupt();
-				if (ROMVersion == ROM_VERSION_32)
-				{
-					M68kRegisters r2;
-					r2.d[0] = 0;
-					Execute68kTrap(0xa072, &r2);
+			cntXpram = cntXpramInterval;
+			static uint32 last_xpram[XPRAM_SIZE/4];
+			if (!IsSection(SECTION_TOS) && !IsSection(SECTION_DISK)) {
+				volatile uint32* s = (volatile uint32*)XPRAM;
+				uint32* d = (uint32*)last_xpram;
+				for (uint16 i=0; i<XPRAM_SIZE/4; i++) {
+					uint32 sd = *s++; uint32 dd = *d;
+					if (sd == dd) {
+						d++;
+					} else {
+						D(bug("diff at %d (%08x -> %08x)\n", i, sd, dd));
+						*d++ = sd;
+						for (i++;i<XPRAM_SIZE/4;i++) {
+							*d++ = *s++;
+						}
+						SaveXPRAM();
+					}
 				}
+				D(bug("xpram diff = %d\n", memcmp(XPRAM, last_xpram, XPRAM_SIZE)));
 			}
-			AtariScreenUpdate();
-			SetZeroPage(ZEROPAGE_TOS);
-			RequestInput();
-			blockInts--;
-			trg60 = 0;
 		}
-		irqActive--;
+	}
+
+#if COUNT_MISSED_VBLS
+	// count ignored vbls (TriggerInterrupt increments by 1)
+	WriteMacInt32(0x16a, ReadMacInt32(0x16a) + (vbls - 1));
+#endif
+
+	// trigger interrupts
+	if (blockVideoInts)
+	{
+		SetInterruptFlag(irq);
+		blockInts--;
+		TriggerInterrupt();
+	}
+	else
+	{
+		UpdateInput();
+		SetInterruptFlag(irq);
+		blockInts--;
+		TriggerInterrupt();
+		RequestInput();
+		irqActive = 0;
+		AtariScreenUpdate();
+	}
+
+	irqActive = 0;
+}
+
+
+//----------------------------------------------------------
+// Tos hires timer (200hz)
+//----------------------------------------------------------
+extern "C" void IntTimerCTos()
+{
+	// mac system timer
+	timer_atari_tick(tck200);
+	// tos 200hz counter
+	*((volatile uint32*)0x04BA) += 1;
+	*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
+	return;
+}
+
+//----------------------------------------------------------
+// Tos system timer (60hz)
+//----------------------------------------------------------
+extern "C" void IntTimerBTos()
+{
+	if (irqActive || TosIrqSafe)
+	{
+		#if COUNT_MISSED_VBLS
+		missedVbls++;
+		#endif
+		*TIMERB_REG_SERVICE = ~TIMERB_MASK_ENABLE;
 		return;
 	}
 
-	//------------------------------------------
-	// MAC
-	//------------------------------------------
-
-	// stop reentrant
-	if (irqActive || (currentZeroPage != ZEROPAGE_MAC))
-	{
-		*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
-		return;	
-	}
-
-	irqActive++;
-
-	// allow mfp interrupts to interrupt us
-	*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
+	// limited vblank to update mouse cursor
+	irqActive = IRQ_TIMERB;
+	*TIMERB_REG_SERVICE = ~TIMERB_MASK_ENABLE;
 	SetSR(0x2500);
-
-	// don't trigger Mac interrupts yet, just flag as pending
 	blockInts++;
-	uint32 irq = 0;
-
-	// Mac Timer irq as often as we can
-	#if PRECISE_TIMING
-	irq |= INTFLAG_TIMER;
-	#endif
-
-	bool doFakeVbl = (trg60 > 0);
-
-	// Mac 60hz interrupt
-	if (doFakeVbl)
+	UpdateInput();
+	SetZeroPage(ZEROPAGE_MAC);
+	WriteMacInt32(0x16a, ReadMacInt32(0x16a) + 1);
+	if (HasMacStarted())
 	{
-		if (blockVideoInts)
-			doFakeVbl = false;
-
-		// Mac 1hz interrupt
-		cnt1 += trg60;
-		if (cnt1 >= 60)
+		AudioInterrupt();
+		ADBInterrupt();
+		//VideoInterrupt();
+		//if (ROMVersion == ROM_VERSION_32)
 		{
-			cnt1 = 0;
-			uint32 tdt = TimerDateTime();
-			WriteMacInt32(0x20c, tdt);
-			irq |= INTFLAG_1HZ;
-
-			#if DEBUG_PERIODIC_TICK
-			uint32 adsi = audio_data + adatStreamInfo;
-			D(bug("tick 1hz [%u, %u, %d, %d, cacr:%08x, a=%08x %08x %08x %d]\n", tdt, ReadMacInt32(0x16a), blockInts, section[SECTION_MAC_EMUOP], GetCACR(),
-				audio_data, *((uint32*)(audio_data + adatStreamInfo)), AudioStatus.mixer, AudioStatus.num_sources));
-			#endif			
-
-			// save xpram to disk every now and again
-			cntXpram++;
-			if (cntXpram > 60)
-			{
-				static uint8 last_xpram[XPRAM_SIZE];
-				if (!IsSection(SECTION_TOS) && !IsSection(SECTION_DISK))
-				{
-					if (memcmp(last_xpram, XPRAM, XPRAM_SIZE))
-					{
-						memcpy(last_xpram, XPRAM, XPRAM_SIZE);
-						SaveXPRAM();
-					}
-					cntXpram = 0;
-				}
-			}
+			M68kRegisters r2;
+			r2.d[0] = 0;
+			Execute68kTrap(0xa072, &r2);
 		}
-
-		// Mac ADB interrupt
-		if (doFakeVbl)
-			UpdateInput();
-
-		// audio
-		irq |= INTFLAG_AUDIO;
-
-		// vbl has been handled
-		irq |= INTFLAG_60HZ;
-
-		// update tick variable
-		//if (trg60 > 0)
-		//	WriteMacInt32(0x16a, ReadMacInt32(0x16a) + trg60);
-		if (trg60 > 1)
-			WriteMacInt32(0x16a, ReadMacInt32(0x16a) + (trg60 - 1));			
-
-		trg60 = 0;
 	}
-
-	// now trigger all the pending Mac interrupts
+	AtariScreenUpdate();
+	SetZeroPage(ZEROPAGE_TOS);
+	RequestInput();
 	blockInts--;
-	SetInterruptFlag(irq);
-	if (InterruptFlags && macIrqEnable)
-		TriggerInterrupt();
-
-
-	if (doFakeVbl)
-		RequestInput();
-
-	irqActive--;
-
-	if (doFakeVbl)
-		AtariScreenUpdate();
-
-	//*TIMERC_REG_SERVICE = ~TIMERC_MASK_ENABLE;
+	irqActive = 0;
+	return;
 }

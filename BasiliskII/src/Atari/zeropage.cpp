@@ -33,7 +33,9 @@ extern "C" void setup_68040_pmmu(void);
 
 #define CACR_OVERRIDE       1
 #define CACR_RESPECT_MAC    0
-#define ENABLE_BRANCH_CACHE 0
+#define NO_TOS_AUTOVECTOR   0
+#define SUPPORT_ALT_TOSVBR  0
+#define SUPPORT_FPEMU       1
 
 ZeroPageState ZPState[3];
 volatile uint16 currentZeroPage = ZEROPAGE_OLD;
@@ -41,7 +43,13 @@ volatile int16 section[NUM_SECTIONS] = { 0 };
 
 uint32  vbrTableTos[256];
 uint32  vbrTableMac[256];
+
+#if SUPPORT_ALT_TOSVBR
+uint16  vecDirectJumpTableMac[256*3];
+uint16  vecDirectJumpTableTos[256*4];
+#else
 uint16  vecDirectJumpTable[256*3];
+#endif
 
 __LINEA *__aline;
 __FONT  **__fonts;
@@ -50,6 +58,7 @@ short  (**__funcs) (void);
 struct MFPTimer
 {
     uint8 en;
+    uint8 mask;
     uint8 ctrl;
     uint8 data;
 };
@@ -59,9 +68,13 @@ bool timersInited = false;
 extern bool isEmuTos;
 extern bool isMagic;
 extern bool isMint;
+extern bool isTT;
 extern uint16 tosVersion;
 extern uint32 ROMSize;
 
+extern uint32 cpu_cacr_override_tos;
+extern uint32 cpu_cacr_override_mac;
+extern uint32 cpu_pcr_override;
 
 /*
 68060
@@ -104,35 +117,66 @@ extern "C" uint16 SetZeroPage(uint16 page)
     }
     SetMMU(&ZPState[page].mmu);
     SetVBR(ZPState[page].vbr);
+    *TIMERC_REG_DATA = ZPState[page].tcdata;
+    *TIMERC_REG_CTRL = ((~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL)) | ZPState[page].tcctrl;
+    *TIMERC_REG_ENABLE = (*TIMERC_REG_ENABLE & ~TIMERC_MASK_ENABLE) | ZPState[page].tcen;
+
 #if CACR_OVERRIDE
     #if CACR_RESPECT_MAC
         // update cacr for mac context
         if (currentZeroPage == ZEROPAGE_MAC) {
             ZPState[ZEROPAGE_MAC].cacr = GetCACR();
         }
-
-        uint32 cacr = ZPState[page].cacr;
-        #if ENABLE_BRANCH_CACHE
-        cacr |= 0x00400000; // flush branch cache
-        #endif
-        SetCACR(cacr);
-    #else
-        SetCACR(ZPState[page].cacr);
     #endif
+    SetCACR(ZPState[page].cacr);
 #else
-    #if ENABLE_BRANCH_CACHE
-    if (HostCPUType >= 6) {
-        uint32 cacr = GetCACR060();
-        cacr |= 0x00400000;
-        SetCACR060(cacr);
-    }
-    #endif
     FlushCache();
 #endif
     uint16 prevZeroPage = currentZeroPage;
     currentZeroPage = page;
+
+#if NO_TOS_AUTOVECTOR
+    static uint16 savedSR = 0x2600;
+    if (prevZeroPage == ZEROPAGE_MAC) {
+        savedSR = sr;
+        sr = 0x2600;
+    } else if (currentZeroPage == ZEROPAGE_MAC) {
+        sr = savedSR;
+    }
+#endif
+
     SetSR(sr);
     return prevZeroPage;
+}
+
+static char* debugReg(uint32 reg, char* regstring)
+{
+    uint8 b = *((volatile uint8*)reg);
+    regstring[0] = (b & (1 << 7)) ? '1' : '0';
+    regstring[1] = (b & (1 << 6)) ? '1' : '0';
+    regstring[2] = (b & (1 << 5)) ? '1' : '0';
+    regstring[3] = (b & (1 << 4)) ? '1' : '0';
+    regstring[4] = (b & (1 << 3)) ? '1' : '0';
+    regstring[5] = (b & (1 << 2)) ? '1' : '0';
+    regstring[6] = (b & (1 << 1)) ? '1' : '0';
+    regstring[7] = (b & (1 << 0)) ? '1' : '0';
+    regstring[8] = 0;
+    return regstring;
+}
+
+static void debugMfpRegs(const char* title)
+{
+    char rs[9*4];
+    log(" %s MFP1:\n", title);
+    for (uint32 r = 0xFFFA01; r <= 0xFFFA25; r+=8) {
+        log("   %08x: %s %s %s %s\n", r, debugReg(r,&rs[9*0]), debugReg(r+2,&rs[9*1]), debugReg(r+4,&rs[9*2]), debugReg(r+6,&rs[9*3]));
+    }
+    if (isTT) {
+        log(" %s MFP2\n", title);
+        for (uint32 r = 0xFFFA81; r <= 0xFFFAA5; r+=8) {
+            log("   %08x: %s %s %s %s\n", r, debugReg(r,&rs[9*0]), debugReg(r+2,&rs[9*1]), debugReg(r+4,&rs[9*2]), debugReg(r+6,&rs[9*3]));
+        }
+    }
 }
 
 void InitTimers()
@@ -140,17 +184,24 @@ void InitTimers()
     if (timersInited)
         return;
 
+    // log mfp registers
+    debugMfpRegs("Old");
+
     // backup timer settings
     mfpTimerOld[0].en = TIMERA_MASK_ENABLE & (*TIMERA_REG_ENABLE);
+    mfpTimerOld[0].mask = TIMERA_MASK_ENABLE & (*TIMERA_REG_MASK);
     mfpTimerOld[0].ctrl = TIMERA_MASK_CTRL & (*TIMERA_REG_CTRL);
     mfpTimerOld[0].data = *TIMERA_REG_DATA;
     mfpTimerOld[1].en = TIMERB_MASK_ENABLE & (*TIMERB_REG_ENABLE);
+    mfpTimerOld[1].mask = TIMERB_MASK_ENABLE & (*TIMERB_REG_MASK);
     mfpTimerOld[1].ctrl = TIMERB_MASK_CTRL & (*TIMERB_REG_CTRL);
     mfpTimerOld[1].data = *TIMERB_REG_DATA;
     mfpTimerOld[2].en = TIMERC_MASK_ENABLE & (*TIMERC_REG_ENABLE);
+    mfpTimerOld[2].mask = TIMERC_MASK_ENABLE & (*TIMERC_REG_MASK);
     mfpTimerOld[2].ctrl = TIMERC_MASK_CTRL & (*TIMERC_REG_CTRL);
     mfpTimerOld[2].data = *TIMERC_REG_DATA;
     mfpTimerOld[3].en = TIMERD_MASK_ENABLE & (*TIMERD_REG_ENABLE);
+    mfpTimerOld[3].mask = TIMERD_MASK_ENABLE & (*TIMERD_REG_MASK);
     mfpTimerOld[3].ctrl = TIMERD_MASK_CTRL & (*TIMERD_REG_CTRL);
     mfpTimerOld[3].data = *TIMERD_REG_DATA;
 
@@ -167,15 +218,14 @@ void InitTimers()
         *TIMERB_REG_ENABLE &= ~TIMERB_MASK_ENABLE;
         *TIMERB_REG_PENDING &= ~TIMERB_MASK_ENABLE;
         *TIMERB_REG_SERVICE &= ~TIMERB_MASK_ENABLE;
-        #if TIMERB_200HZ
-            SetMacVector(TIMERB_VECTOR, VecTimer1);
-            SetTosVector(TIMERB_VECTOR, VecTimer1);
-            const unsigned char ctrl = (5 << TIMERB_SHIFT_CTRL);    // divide base clock by 64
-            const unsigned char data = 192;                         // 200 hz ((2457600 / (64 * 192))
-            *TIMERB_REG_CTRL = (((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | (ctrl << TIMERB_SHIFT_CTRL));
-            *TIMERB_REG_DATA = data;
-            *TIMERB_REG_ENABLE  |= TIMERB_MASK_ENABLE;
-        #endif
+        SetMacVector(TIMERB_VECTOR, VecMacTimerB);
+        SetTosVector(TIMERB_VECTOR, VecTosTimerB);
+        const unsigned char ctrl = (7 << TIMERB_SHIFT_CTRL);    // divide base clock by 200
+        const unsigned char data = 205;                         // 59.9 hz ((2457600 / (200 * 205))
+        *TIMERB_REG_CTRL = ((~TIMERB_MASK_CTRL) & (*TIMERB_REG_CTRL)) | ctrl;
+        *TIMERB_REG_DATA = data;
+        *TIMERB_REG_ENABLE |= TIMERB_MASK_ENABLE;
+        *TIMERB_REG_MASK |= TIMERB_MASK_ENABLE;
     }
 
     // timer-C (tos system timer)
@@ -189,14 +239,20 @@ void InitTimers()
         mfpTimerOld[2].ctrl = (5 << TIMERC_SHIFT_CTRL);
         mfpTimerOld[2].data = 192;
         // new vectors
-        SetMacVector(TIMERC_VECTOR, VecTimer2);
-        SetTosVector(TIMERC_VECTOR, VecTimer2);
+        SetMacVector(TIMERC_VECTOR, VecMacTimerC);
+        SetTosVector(TIMERC_VECTOR, VecTosTimerC);
+        ZPState[ZEROPAGE_MAC].tcen = 0;
+        ZPState[ZEROPAGE_MAC].tcctrl = (4 << TIMERC_SHIFT_CTRL);    // divide base clock by 50
+        ZPState[ZEROPAGE_MAC].tcdata = 49;                          // 1003hz ((2457600 / (50 * 49))
         // new params
-        const unsigned char ctrl = (4 << TIMERC_SHIFT_CTRL);    // divide base clock by 50
-        const unsigned char data = 49;                          // 1003hz ((2457600 / (50 * 49))
+        const unsigned char ctrl = (5 << TIMERC_SHIFT_CTRL);    // divide base clock by 64
+        const unsigned char data = 192;                         // 200 hz ((2457600 / (64 * 192))
+        //const unsigned char ctrl = (4 << TIMERC_SHIFT_CTRL);    // divide base clock by 50
+        //const unsigned char data = 49;                          // 1003hz ((2457600 / (50 * 49))
         *TIMERC_REG_CTRL = ((~TIMERC_MASK_CTRL) & (*TIMERC_REG_CTRL)) | ctrl;
         *TIMERC_REG_DATA = data;
-        *TIMERC_REG_ENABLE  |= TIMERC_MASK_ENABLE;
+        *TIMERC_REG_ENABLE |= TIMERC_MASK_ENABLE;
+        *TIMERC_REG_MASK |= TIMERC_MASK_ENABLE;
     }
 
     // timer-D (baud rate generator)
@@ -206,6 +262,10 @@ void InitTimers()
         //*TIMERD_REG_PENDING &= ~TIMERD_MASK_ENABLE;
         //*TIMERD_REG_SERVICE &= ~TIMERD_MASK_ENABLE;
     }
+
+    // log mfp registers
+    debugMfpRegs("New");
+
 
     timersInited = true;
 }
@@ -273,31 +333,34 @@ bool InitZeroPage()
     currentZeroPage = ZEROPAGE_OLD;
     ZPState[ZEROPAGE_OLD].vbr = GetVBR();
     ZPState[ZEROPAGE_OLD].cacr = GetCACR();
+    ZPState[ZEROPAGE_OLD].tcen = TIMERC_MASK_ENABLE;
+    ZPState[ZEROPAGE_OLD].tcctrl = (5 << TIMERC_SHIFT_CTRL);    // divide base clock by 64
+    ZPState[ZEROPAGE_OLD].tcdata = 192;                         // 200 hz ((2457600 / (64 * 192))
+
     GetMMU(&ZPState[ZEROPAGE_OLD].mmu);
     memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
     memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
 
     if (HostCPUType >= 6)
     {
-        uint32 cacr = GetCACR060();
-        cacr &= 0x80008000;     // mask data + instr cache only
-        cacr |= 0x00400000;     // flush branch cache
-        SetCACR060(cacr);
-        #if !ENABLE_BRANCH_CACHE
-            cacr &= 0x80008000; // no need to flush disabled branch cache on context switch
-        #endif        
+        uint32 cacr = ZPState[ZEROPAGE_OLD].cacr & 0x80008000;  // data + instruction caches only
         ZPState[ZEROPAGE_TOS].cacr = cacr;
         ZPState[ZEROPAGE_MAC].cacr = cacr;
     }
 
+    // disable caches during init
+    SetCACR(0);
     return true;
 }
 
 void RestoreZeroPage()
 {
+    uint16 sr = DisableInterrupts();
     SetZeroPage(ZEROPAGE_OLD);
+    SetCACR(ZPState[ZEROPAGE_OLD].cacr);
     memcpy(&ZPState[ZEROPAGE_TOS], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
     memcpy(&ZPState[ZEROPAGE_MAC], &ZPState[ZEROPAGE_OLD], sizeof(ZeroPageState));
+    SetSR(sr);
 }
 
 bool SetupZeroPage()
@@ -312,24 +375,10 @@ bool SetupZeroPage()
     log(" tosVbr  = 0x%08x\n", ZPState[ZEROPAGE_TOS].vbr);
     log(" macVbr  = 0x%08x\n", ZPState[ZEROPAGE_MAC].vbr);
 
-    if ((HostCPUType >= 4) && (ROMSize < (1024 * 1024)))
-    {
-        log("Disabling cpu cache (512k ROM on 68040+)\n");
-        SetCACR(0);
-    }
-
-    uint32 cacr = GetCACR();
-    ZPState[ZEROPAGE_TOS].cacr = cacr;
-    ZPState[ZEROPAGE_MAC].cacr = cacr;
-
 #if CACR_OVERRIDE
     #if CACR_RESPECT_MAC
         ZPState[ZEROPAGE_MAC].cacr = 0;                 // Mac sets up the cache
     #else
-        #if ENABLE_BRANCH_CACHE
-        if (HostCPUType >= 6)
-            ZPState[ZEROPAGE_MAC].cacr = 0x80408000;     // enable data+instr cache, flush branch cache
-        #endif
         if (HostCPUType >= 4)
             ZPState[ZEROPAGE_MAC].cacr = 0x80008000;     // data+instr cache
         else
@@ -337,8 +386,17 @@ bool SetupZeroPage()
     #endif
 #endif
 
+    if (cpu_cacr_override_tos != 0xFFFFFFFF)
+        ZPState[ZEROPAGE_TOS].cacr = cpu_cacr_override_tos;
+
+    if (cpu_cacr_override_mac != 0xFFFFFFFF)
+        ZPState[ZEROPAGE_MAC].cacr = cpu_cacr_override_mac;
+
     if (HostCPUType >= 6)
     {
+        if (cpu_pcr_override != 0xFFFFFFFF)
+            SetPCR060(cpu_pcr_override);
+
         log(" oldPcr  = 0x%08x\n", oldPCR);
         log(" newPcr  = 0x%08x\n", GetPCR060());
     }
@@ -352,7 +410,34 @@ bool SetupZeroPage()
     //  Vectors
     //---------------------------------------------------------------------
 
-    // jump to the real Tos/Mac vector by default
+#if SUPPORT_ALT_TOSVBR
+    // mac jumptable
+    for(uint16 i=0,j=0; i<0x400; i+=4)
+    {
+        SetMacVector(i, &vecDirectJumpTableMac[j]);
+        vecDirectJumpTableMac[j++] = 0x2F38;   // move.l (addr).w,-(sp)
+        vecDirectJumpTableMac[j++] = i;        // addr
+        vecDirectJumpTableMac[j++] = 0x4E75;   // rts
+    }
+    // tos jumptable
+    uint32 vbr = ZPState[ZEROPAGE_OLD].vbr;
+    if (vbr < 0x10000) {
+        for (uint16 i=0, j=0; i<0x400; i+=4, vbr+=4) {
+            SetTosVector(i, &vecDirectJumpTableTos[j]);
+            vecDirectJumpTableTos[j++] = 0x2F38;    // move.l (addr).w,-(sp)
+            vecDirectJumpTableTos[j++] = vbr;       // addr
+            vecDirectJumpTableTos[j++] = 0x4E75;    // rts
+        }
+    } else {
+        for (uint16 i=0, j=0; i<0x400; i+=4, vbr+=4) {
+            SetTosVector(i, &vecDirectJumpTableTos[j]);
+            vecDirectJumpTableTos[j++] = 0x2F39;            // move.l (addr).w,-(sp)
+            vecDirectJumpTableTos[j++] = (vbr >> 16);       // addr hi
+            vecDirectJumpTableTos[j++] = (vbr & 0xFFFF);    // addr lo
+            vecDirectJumpTableTos[j++] = 0x4E75;            // rts
+        }
+    }
+#else
     for(uint16 i=0,j=0; i<0x400; i+=4)
     {
         SetMacVector(i, &vecDirectJumpTable[j]);
@@ -361,13 +446,24 @@ bool SetupZeroPage()
         vecDirectJumpTable[j++] = i;        // addr
         vecDirectJumpTable[j++] = 0x4E75;   // rts
     }
+#endif
 
     // exceptions
-    SetMacVector(0x10, VecMacException);    // illegal instruction
-    SetMacVector(0x14, VecRte);             // divide by zero
-    SetMacVector(0x20, VecMacException);    // priviledged instruction
+    SetMacVector(0x10, VecMacIllegalInstruction);   // illegal instruction
+    SetMacVector(0x14, VecRte);                     // divide by zero
+    SetMacVector(0x20, VecMacException);            // priviledged instruction
 #if LINEA_DEBUG
     SetMacVector(0x28, VecMacException);    // linea
+#endif
+
+    // tos linef emulator
+#if SUPPORT_FPEMU
+    extern int FPUType;
+    if (FPUType != 0) {
+        uint32 fline = *((volatile uint32*)0x2C);
+        if ((fline > 12) && strncmp((char*)fline-8, "FPE", 3) == 0)
+            SetMacVector(0x2C, fline);
+    }
 #endif
 
 
@@ -413,6 +509,7 @@ bool SetupZeroPage()
         SetMacVector(i, VecRte);
         SetTosVector(i, VecRte);
     }
+
 
     // MFP interrupts (two of them)
     for (uint16 i=0x100; i<0x180; i+=4)

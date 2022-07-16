@@ -83,6 +83,12 @@ struct prefs_desc {
 	const char *help;	// Help/descriptive text about this item
 };
 
+#ifdef ATARI
+#define PREFS_ITEM(var, type, multiple, info) {var, type, multiple, NULL}
+#else
+#define PREFS_ITEM(var, type, multiple, info) {var, type, multiple, info}
+#endif
+
 // List of common preferences items (those which exist on all platforms)
 extern prefs_desc common_prefs_items[];
 

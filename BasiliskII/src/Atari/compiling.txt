@@ -1,4 +1,3 @@
-
 Build with Vincent Rivière's GCC 4.6.4
 http://vincent.riviere.free.fr/soft/m68k-atari-mint/
 
@@ -8,15 +7,12 @@ Some host version of GCC is needed to build a few tools.
 Todos:
 
 General:
-  - The code needs tidying up...
-  - Implement:
-      ether_atari
-      extfs_atari
-      serial_atari
-      scsi_atari
+  ether_atari
+  extfs_atari
+  serial_atari
+  scsi_atari
 
 Disk:
-  - Implement a decent disk cache
   - CDRom support
 
 Sound:
@@ -34,23 +30,3 @@ Sound:
     different stack frame compared to 040)
 
 
-
-Bugs:
-
-
-CT60:
-	Tested in 928x720 resolution
-
-	060 graphics emulation. Runs but there are MMU issues.
-	also it doesnt seem really stable....
-	after a crash, 060 caches are off... not always, thats the odd part
-
-	basilisk start, exit at dialog = cache off
-		btw, its exit code which disable caches... hope it dont disable them just before basilisk run 😉
-
-	and another oddness: last few attempts to do all speed tests  failed, as speedometer crashed to TOS....
-	lcii, quadra, both roms, mmu/cmp on or off.
-
-
-
-928*720

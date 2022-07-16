@@ -82,11 +82,15 @@ extern void VecOriginal();
 extern void VecMacLineA();
 extern void VecMacHandler();
 extern void VecAcia();
-extern void VecTimer1();
-extern void VecTimer2();
 extern void VecTosIrq();
 extern void VecMacException();
 extern void VecMacFpuException();
+extern void VecMacIllegalInstruction();
+
+extern void VecMacTimerB();
+extern void VecTosTimerB();
+extern void VecMacTimerC();
+extern void VecTosTimerC();
 
 // Motorola 68060 support vectors
 extern void Vec060_isp_unimp();

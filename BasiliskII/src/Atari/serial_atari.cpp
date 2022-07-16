@@ -30,114 +30,109 @@
 #include "debug.h"
 
 
-// Driver private variables
-class DSERDPort : public SERDPort {
+//----------------------------------------------------------------------
+// Base port
+//----------------------------------------------------------------------
+class ASERDPort : public SERDPort {
 public:
-	DSERDPort(const char *dev)
-	{
+	ASERDPort(const char *dev) {
 		device_name = (char *)dev;
 	}
-
-	virtual ~DSERDPort()
-	{
+	virtual ~ASERDPort() {
 	}
-
 	virtual int16 open(uint16 config);
 	virtual int16 prime_in(uint32 pb, uint32 dce);
 	virtual int16 prime_out(uint32 pb, uint32 dce);
 	virtual int16 control(uint32 pb, uint32 dce, uint16 code);
 	virtual int16 status(uint32 pb, uint32 dce, uint16 code);
 	virtual int16 close(void);
-
+	virtual int16 update(void);
 private:
 	char *device_name;			// Device name
 };
 
 
-/*
- *  Initialization
- */
+
+//----------------------------------------------------------------------
+//
+//	Helpers
+//
+//----------------------------------------------------------------------
+
+SERDPort* CreateSerialPort(const char* dev)
+{
+	// todo: create device based on "dev" type
+	return new ASERDPort(dev);
+}
+
+
+//----------------------------------------------------------------------
+//
+//	Basilisk interface
+//
+//----------------------------------------------------------------------
 
 void SerialInit(void)
 {
-	// Read serial preferences and create structs for both ports
-	the_serd_port[0] = new DSERDPort(PrefsFindString("seriala"));
-	the_serd_port[1] = new DSERDPort(PrefsFindString("serialb"));
+	the_serd_port[0] = CreateSerialPort(PrefsFindString("seriala"));
+	the_serd_port[1] = CreateSerialPort(PrefsFindString("serialb"));
 }
-
-
-/*
- *  Deinitialization
- */
 
 void SerialExit(void)
 {
-	delete (DSERDPort *)the_serd_port[0];
-	delete (DSERDPort *)the_serd_port[1];
+	delete (ASERDPort*)the_serd_port[0];
+	delete (ASERDPort*)the_serd_port[1];
 }
 
-
-/*
- *  Open serial port
- */
-
-int16 DSERDPort::open(uint16 config)
+void SerialUpdate(void)
 {
-	D(bug("DSERDPort::open %04x\n", config));
+	((ASERDPort*)the_serd_port[0])->update();
+	((ASERDPort*)the_serd_port[1])->update();
+}
+
+//----------------------------------------------------------------------
+//
+//	Dummy device
+//
+//----------------------------------------------------------------------
+
+int16 ASERDPort::open(uint16 config)
+{
+	D(bug("ASERDPort::open %04x\n", config));
 	return openErr;
 }
 
-
-/*
- *  Read data from port
- */
-
-int16 DSERDPort::prime_in(uint32 pb, uint32 dce)
+int16 ASERDPort::prime_in(uint32 pb, uint32 dce)
 {
-	D(bug("DSERDPort::prime_in %08x, %08x\n", pb, dce));
+	D(bug("ASERDPort::prime_in %08x, %08x\n", pb, dce));
 	return readErr;
 }
 
-
-/*
- *  Write data to port
- */
-
-int16 DSERDPort::prime_out(uint32 pb, uint32 dce)
+int16 ASERDPort::prime_out(uint32 pb, uint32 dce)
 {
-	D(bug("DSERDPort::prime_in %08x, %08x\n", pb, dce));
+	D(bug("ASERDPort::prime_in %08x, %08x\n", pb, dce));
 	return writErr;
 }
-
-
-/*
- *	Control calls
- */
  
-int16 DSERDPort::control(uint32 pb, uint32 dce, uint16 code)
+int16 ASERDPort::control(uint32 pb, uint32 dce, uint16 code)
 {
-	D(bug("DSERDPort::control %08x, %08x, %04x\n", pb, dce, code));
+	D(bug("ASERDPort::control %08x, %08x, %04x\n", pb, dce, code));
 	return controlErr;
 }
 
-
-/*
- *	Status calls
- */
-
-int16 DSERDPort::status(uint32 pb, uint32 dce, uint16 code)
+int16 ASERDPort::status(uint32 pb, uint32 dce, uint16 code)
 {
-	D(bug("DSERDPort::status %08x, %08x, %04x\n", pb, dce, code));
+	D(bug("ASERDPort::status %08x, %08x, %04x\n", pb, dce, code));
 	return statusErr;
 }
 
-
-/*
- *	Close serial port
- */
-
-int16 DSERDPort::close()
+int16 ASERDPort::close()
 {
-	D(bug("DSERDPort::close\n"));
+	D(bug("ASERDPort::close\n"));
 	return noErr;
+}
+
+int16 ASERDPort::update()
+{
+	return 0;
 }

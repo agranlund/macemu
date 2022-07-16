@@ -158,6 +158,7 @@ again:
 /*
  *  Print ROM information to stream,
  */
+#if DEBUG || !defined(ATARI)
 
 static void list_rom_resources(void)
 {
@@ -309,6 +310,13 @@ static void print_rom_info(void)
 	}
 }
 
+#else
+
+static void print_rom_info(void)
+{
+}
+
+#endif
 
 /*
  *  Driver stubs

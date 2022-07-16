@@ -13,8 +13,8 @@
   derkom, Badwolf, SWE/YesCREW, Odd Skancke, Miro Kropáček,
   and everyone else who has helped testing this.
  
-  Version: 220625
-
+  Version: 220716
+  
 --------------------
 License
 --------------------

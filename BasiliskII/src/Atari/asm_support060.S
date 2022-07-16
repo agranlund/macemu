@@ -37,19 +37,22 @@ _FlushCache060:
 	nop
 	cpusha	bc						// flush data + instruction caches
 	nop
-//	movec	cacr,d0
-//	or.l	0x00400000,d0			// flush branch cache
-//	movec	d0,cacr
+	movec	cacr,d0
+	or.l	0x00400000,d0			// flush branch cache (probably not needed due to cpusha bc?)
+	movec	d0,cacr
+	nop
 	rts
 
 _SetCACR060:
 	move.l	d0,-(sp)
 	move.l	8(sp),d0
 	nop
-	cpusha	bc
+	cpusha	bc						// flush data + instruction caches
 	nop
 	movec	d0,cacr
+	or.l	0x00400000,d0			// flush branch cache (probably not needed due to cpusha bc?)
 	move.l	(sp)+,d0
+	nop
 	rts
 
 

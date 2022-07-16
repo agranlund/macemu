@@ -28,24 +28,27 @@
 
 // Platform-specific preferences items
 prefs_desc platform_prefs_items[] = {
-	{"_disk",			TYPE_STRING,	true,  "Disabled disk"},
-	{"_extfs",			TYPE_STRING,	true,  "Disabled extfs"},
-	{"diskdevmode",		TYPE_INT32,		false, "Device access mode"},
-	{"diskcache", 		TYPE_BOOLEAN, 	false, "Disk image cache"},
-	{"diskcachesize",	TYPE_INT32, 	false, "Disk image cache size"},
-	{"logging", 		TYPE_STRING, 	false, "Debug log output"},
-	{"logging_full", 	TYPE_BOOLEAN, 	false, "Log always"},
-	{"irqsafe", 		TYPE_BOOLEAN, 	false, "Allow Mac VBL during TOS calls"},
-	{"sound_driver",	TYPE_INT32, 	false, "Atari sound driver"},
-	{"sound_freq",		TYPE_INT32, 	false, "Default sound frequency"},
-	{"sound_channels",	TYPE_INT32, 	false, "Default num channels"},
-	{"sound_bits",		TYPE_INT32, 	false, "Default sample size"},
-	{"mouse_speed",		TYPE_INT32,		false, "Mouse speed"},
-	{"video_mode",		TYPE_INT32,		false, "Video mode"},
-	{"video_emu",		TYPE_BOOLEAN,	false, "Enable emulation"},
-	{"video_mmu",		TYPE_BOOLEAN,	false, "MMU acceleration"},
-	{"video_cmp",		TYPE_BOOLEAN,	false, "CMP acceleration"},
-	{"video_debug",		TYPE_INT32,		false, "Video debugging"},
+	PREFS_ITEM("_disk",			TYPE_STRING,	true,  "Disabled disk"),
+	PREFS_ITEM("_extfs",		TYPE_STRING,	true,  "Disabled extfs"),
+	PREFS_ITEM("diskdevmode",	TYPE_INT32,		false, "Device access mode"),
+	PREFS_ITEM("diskcache", 	TYPE_BOOLEAN, 	false, "Disk image cache"),
+	PREFS_ITEM("diskcachesize",	TYPE_INT32, 	false, "Disk image cache size"),
+	PREFS_ITEM("logging", 		TYPE_STRING, 	false, "Debug log output"),
+	PREFS_ITEM("logging_full", 	TYPE_BOOLEAN, 	false, "Log always"),
+	PREFS_ITEM("irqsafe", 		TYPE_BOOLEAN, 	false, "Allow Mac VBL during TOS calls"),
+	PREFS_ITEM("sound_driver",	TYPE_INT32, 	false, "Atari sound driver"),
+	PREFS_ITEM("sound_freq",	TYPE_INT32, 	false, "Default sound frequency"),
+	PREFS_ITEM("sound_channels",TYPE_INT32, 	false, "Default num channels"),
+	PREFS_ITEM("sound_bits",	TYPE_INT32, 	false, "Default sample size"),
+	PREFS_ITEM("mouse_speed",	TYPE_INT32,		false, "Mouse speed"),
+	PREFS_ITEM("video_mode",	TYPE_INT32,		false, "Video mode"),
+	PREFS_ITEM("video_emu",		TYPE_BOOLEAN,	false, "Enable emulation"),
+	PREFS_ITEM("video_mmu",		TYPE_BOOLEAN,	false, "MMU acceleration"),
+	PREFS_ITEM("video_cmp",		TYPE_BOOLEAN,	false, "CMP acceleration"),
+	PREFS_ITEM("video_debug",	TYPE_INT32,		false, "Video debugging"),
+	PREFS_ITEM("cpu_cacr_tos",	TYPE_STRING,	false, "Force CACR for TOS"),
+	PREFS_ITEM("cpu_cacr_mac",	TYPE_STRING,	false, "Force CACR for MAC"),
+	PREFS_ITEM("cpu_pcr",		TYPE_STRING,	false, "Force 68060 PCR"),
 	{NULL, TYPE_END, false, NULL} // End of list
 };
 
@@ -103,16 +106,6 @@ void SavePrefs(void)
 
 void AddPlatformPrefsDefaults(void)
 {
-	// remove common default prefs that aren't useful for us
-	PrefsRemoveItem("udptunnel");
-	PrefsRemoveItem("udpport");
-	PrefsRemoveItem("displaycolordepth");
-	PrefsRemoveItem("noclipconversion");
-	PrefsRemoveItem("jit");
-	PrefsRemoveItem("swap_opt_cmd");
-	PrefsRemoveItem("ignoresegv");
-	PrefsRemoveItem("cpu");
-
 	// new defaults for atari
 	PrefsReplaceInt32("frameskip", 1);		// frameskip for emulated graphics
 	PrefsReplaceInt32("ramsize", 0);		// autodetect
@@ -149,8 +142,6 @@ void AddPlatformPrefsDefaults(void)
 
 	PrefsAddBool("video_emu", true);		// enable emulation
 	PrefsAddBool("video_mmu", true);		// mmu acceleration enabled
-	PrefsAddBool("video_cmp", false);		// hash acceleration disabled
 	PrefsAddBool("video_mode", 0);			// use desktop gfxmode
 	PrefsAddInt32("video_debug", 0);		// debug options
-	//PrefsReplaceInt32("frameskip", 2);
 }

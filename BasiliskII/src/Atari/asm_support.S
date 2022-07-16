@@ -48,21 +48,27 @@ _oldPCR:		ds.l 1
 
 	.globl	_VecRts
 	.globl	_VecRte
+	.globl	_VecNoHbl
 	.globl	_VecTosIrq
 	.globl	_VecMacLineA
 
 	.globl	_VecAcia
 	.globl	_VecAciaC
 
-	.globl	_VecTimer1
-	.globl	_VecTimer1C
-	.globl	_VecTimer2
-	.globl	_VecTimer2C
-
+	.globl	_VecMacIllegalInstruction
 	.globl	_VecMacException
 	.globl	_VecMacExceptionC
 	.globl	_VecMacFpuException
 
+	.globl	_VecMacTimerB
+	.globl	_VecTosTimerB
+	.globl	_VecMacTimerC
+	.globl	_VecTosTimerC
+
+	.globl	_IntTimerBMac
+	.globl	_IntTimerBTos
+	.globl	_IntTimerCMac
+	.globl	_IntTimerCTos
 
 
 // In Hatari, there is a situation where the SR register becomes broken when
@@ -195,7 +201,6 @@ _VecNoHbl:
 	move.w	#0x2300,(sp)
 	rte
 
-
 _VecMacLineA:
 	move.l	0x28.w,-(sp)
 	rts
@@ -208,23 +213,31 @@ _VecAcia:
 	bclr	#6,0xFFFFFA11.w		    		// Interrupt not in service
 	rte
 
-_VecTimer1:
+_VecTosTimerB:
 	MFP_SR_FIX
 	movem.l	d0-d2/a0-a2,-(sp)				// save registers
-	move.w	24(sp),-(sp)					// push original sr as argument
-	move.w	#0,-(sp)
-	jsr		_VecTimer1C						// and call the C handler
-	addq.l	#4,sp							// restore stack
+	jsr		_IntTimerBTos					// and call the C handler
 	movem.l	(sp)+,d0-d2/a0-a2				// restore registers
 	rte
 
-_VecTimer2:
+_VecMacTimerB:
 	MFP_SR_FIX
 	movem.l	d0-d2/a0-a2,-(sp)				// save registers
-	move.w	24(sp),-(sp)					// push original sr as argument
-	move.w	#0,-(sp)
-	jsr		_VecTimer2C						// and call the C handler
-	addq.l	#4,sp							// restore stack
+	jsr		_IntTimerBMac					// and call the C handler
+	movem.l	(sp)+,d0-d2/a0-a2				// restore registers
+	rte
+
+_VecTosTimerC:
+	MFP_SR_FIX
+	movem.l	d0-d2/a0-a2,-(sp)				// save registers
+	jsr		_IntTimerCTos					// and call the C handler
+	movem.l	(sp)+,d0-d2/a0-a2				// restore registers
+	rte
+
+_VecMacTimerC:
+	MFP_SR_FIX
+	movem.l	d0-d2/a0-a2,-(sp)				// save registers
+	jsr		_IntTimerCMac					// and call the C handler
 	movem.l	(sp)+,d0-d2/a0-a2				// restore registers
 	rte
 
@@ -258,20 +271,20 @@ _VecMacFpuException:
 	rte
 
 _VecMacException:
+_VecMacIllegalInstruction:
 	//move.w	#0x2700,sr
-	movem.l	d0-d7/a0-a7,-(sp)				// save all registers
+	movem.l	d0-d7/a0-a7,-(sp)				// push all registers, these can be modified by _VecMacExceptionC
 	move.l	sp,d0
-	move.l	d0,-(sp)
+	move.l	d0,-(sp)						// push sp (which is now our trap_regs*)
 	add.l	#64+8,d0
-	move.l	d0,64(sp)
+	move.l	d0,64(sp)						// correct pushed a7
 	jsr		_VecMacExceptionC
 	cmp.w	#0,d0
-	beq		.mvh0
-	addq.l	#4,sp
-	movem.l	(sp)+,d0-d7/a0-a6
-	addq.l	#4,sp
+	beq.s	.mvh0
+	addq.l	#4,sp							// restore stack after c call
+	movem.l	(sp)+,d0-d7/a0-a6				// pop all registers
+	addq.l	#4,sp							// but ignore potentially modified sp
 	rte
-
 .mvh0:
 	move.w	68+6(sp),d0						// get format/offset word from exception frame
 	and.l	#0x00000FFF,d0					// mask offset bits
