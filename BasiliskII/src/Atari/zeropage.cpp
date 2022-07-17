@@ -34,7 +34,7 @@ extern "C" void setup_68040_pmmu(void);
 #define CACR_OVERRIDE       1
 #define CACR_RESPECT_MAC    0
 #define NO_TOS_AUTOVECTOR   0
-#define SUPPORT_ALT_TOSVBR  0
+#define SUPPORT_ALT_TOSVBR  1
 #define SUPPORT_FPEMU       1
 
 ZeroPageState ZPState[3];
@@ -460,9 +460,19 @@ bool SetupZeroPage()
 #if SUPPORT_FPEMU
     extern int FPUType;
     if (FPUType != 0) {
-        uint32 fline = *((volatile uint32*)0x2C);
-        if ((fline > 12) && strncmp((char*)fline-8, "FPE", 3) == 0)
-            SetMacVector(0x2C, fline);
+        uint32 fline = *((volatile uint32*) (0x2C));
+        while (fline > 12) {
+            char* xbra = (char*)fline - 12;
+            fline = 0;
+            if (strncmp(xbra, "XBRA", 4) == 0) {
+                if (strncmp(xbra+4, "FPE", 3) == 0) {
+                    log(" lineF emulator at %08x\n", (uint32) (xbra + 12));
+                    SetMacVector(0x2C, (uint32) (xbra + 12));
+                } else {
+                    fline = *((uint32*)(xbra + 8));
+                }
+            }
+        }
     }
 #endif
 

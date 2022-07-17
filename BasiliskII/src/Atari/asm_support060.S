@@ -49,8 +49,8 @@ _SetCACR060:
 	nop
 	cpusha	bc						// flush data + instruction caches
 	nop
-	movec	d0,cacr
 	or.l	0x00400000,d0			// flush branch cache (probably not needed due to cpusha bc?)
+	movec	d0,cacr
 	move.l	(sp)+,d0
 	nop
 	rts
